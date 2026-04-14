@@ -28,32 +28,34 @@ func (c *branchProtectionChecker) Check(ctx context.Context, client *github.Clie
 		}, nil
 	}
 
-	protection, resp, err := client.Repositories.GetBranchProtection(ctx, repo.Owner, repo.Name, branch)
+	protection, statusCode, err := gh.GetBranchProtection(ctx, client, repo.Owner, repo.Name, branch)
 	if err != nil {
-		if resp != nil {
-			switch resp.StatusCode {
-			case 404:
-				return &compliance.Result{
-					RuleID:   rule.ID,
-					RuleName: rule.Name,
-					Repo:     repo.FullName,
-					Status:   compliance.StatusFail,
-					Severity: rule.Severity,
-					Message:  fmt.Sprintf("branch protection not enabled on %s", branch),
-				}, nil
-			case 403:
-				// Free plan private repos don't support branch protection via API.
-				return &compliance.Result{
-					RuleID:   rule.ID,
-					RuleName: rule.Name,
-					Repo:     repo.FullName,
-					Status:   compliance.StatusSkip,
-					Severity: rule.Severity,
-					Message:  "branch protection API not available (requires GitHub Pro or public repository)",
-				}, nil
-			}
+		return nil, err
+	}
+	if protection == nil {
+		switch statusCode {
+		case 404:
+			return &compliance.Result{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				Repo:     repo.FullName,
+				Status:   compliance.StatusFail,
+				Severity: rule.Severity,
+				Message:  fmt.Sprintf("branch protection not enabled on %s", branch),
+			}, nil
+		case 403:
+			// Free plan private repos don't support branch protection via API.
+			return &compliance.Result{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				Repo:     repo.FullName,
+				Status:   compliance.StatusSkip,
+				Severity: rule.Severity,
+				Message:  "branch protection API not available (requires GitHub Pro or public repository)",
+			}, nil
+		default:
+			return nil, fmt.Errorf("fetching branch protection for %s/%s:%s: unexpected status %d", repo.Owner, repo.Name, branch, statusCode)
 		}
-		return nil, fmt.Errorf("fetching branch protection for %s/%s:%s: %w", repo.Owner, repo.Name, branch, err)
 	}
 
 	// Check optional params

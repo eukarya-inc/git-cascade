@@ -16,39 +16,26 @@ type externalCollaboratorsChecker struct{}
 func (c *externalCollaboratorsChecker) ID() string { return "external-collaborators" }
 
 func (c *externalCollaboratorsChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
-	// List outside collaborators with direct access
-	opts := &github.ListCollaboratorsOptions{
-		Affiliation: "outside",
-		ListOptions: github.ListOptions{PerPage: 100},
+	collabs, statusCode, err := gh.ListCollaborators(ctx, client, repo.Owner, repo.Name, "outside")
+	if err != nil {
+		return nil, err
+	}
+	if collabs == nil && statusCode == 403 {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusSkip,
+			Severity: rule.Severity,
+			Message:  "insufficient permissions to list collaborators",
+		}, nil
 	}
 
 	var adminCollabs []string
-	for {
-		collabs, resp, err := client.Repositories.ListCollaborators(ctx, repo.Owner, repo.Name, opts)
-		if err != nil {
-			if resp != nil && resp.StatusCode == 403 {
-				return &compliance.Result{
-					RuleID:   rule.ID,
-					RuleName: rule.Name,
-					Repo:     repo.FullName,
-					Status:   compliance.StatusSkip,
-					Severity: rule.Severity,
-					Message:  "insufficient permissions to list collaborators",
-				}, nil
-			}
-			return nil, fmt.Errorf("listing collaborators for %s: %w", repo.FullName, err)
+	for _, collab := range collabs {
+		if perms := collab.GetPermissions(); perms != nil && perms.GetAdmin() {
+			adminCollabs = append(adminCollabs, collab.GetLogin())
 		}
-
-		for _, collab := range collabs {
-			if perms := collab.GetPermissions(); perms != nil && perms.GetAdmin() {
-				adminCollabs = append(adminCollabs, collab.GetLogin())
-			}
-		}
-
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
 	}
 
 	if len(adminCollabs) > 0 {

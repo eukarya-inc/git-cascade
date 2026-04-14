@@ -32,15 +32,8 @@ func ListOrgRepos(ctx context.Context, client *github.Client, org string) ([]Rep
 	for {
 		repos, resp, err := client.Repositories.ListByOrg(ctx, org, opts)
 		if err != nil {
-			var rle *github.RateLimitError
-			if errors.As(err, &rle) {
-				resetIn := max(time.Until(rle.Rate.Reset.Time), 0)
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(resetIn + time.Second):
-					continue
-				}
+			if waitForRateLimit(ctx, err) {
+				continue
 			}
 			return nil, fmt.Errorf("listing repos for org %s: %w", org, err)
 		}
@@ -65,22 +58,15 @@ func ListOrgRepos(ctx context.Context, client *github.Client, org string) ([]Rep
 // FetchFileContent retrieves the content of a file from a repository.
 // For files larger than 1 MB the GitHub API returns encoding=none; in that
 // case we fall back to DownloadContents which streams the raw blob.
-// Rate limit errors are retried once after waiting for the reset window.
+// Rate limit errors are retried after waiting for the reset window.
 func FetchFileContent(ctx context.Context, client *github.Client, owner, repo, path, ref string) ([]byte, error) {
 	opts := &github.RepositoryContentGetOptions{Ref: ref}
 
-	for range 2 {
+	for {
 		fileContent, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, path, opts)
 		if err != nil {
-			var rle *github.RateLimitError
-			if errors.As(err, &rle) {
-				resetIn := max(time.Until(rle.Rate.Reset.Time), 0)
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(resetIn + time.Second):
-					continue
-				}
+			if waitForRateLimit(ctx, err) {
+				continue
 			}
 			if resp != nil && resp.StatusCode == 404 {
 				return nil, nil // file does not exist
@@ -111,6 +97,89 @@ func FetchFileContent(ctx context.Context, client *github.Client, owner, repo, p
 
 		return []byte(content), nil
 	}
+}
 
-	return nil, fmt.Errorf("fetching %s from %s/%s: rate limit exceeded after retry", path, owner, repo)
+// ListDirectoryContents returns the directory entries at the given path.
+// Returns nil (no error) if the path does not exist (404).
+// Rate limit errors are retried after waiting for the reset window.
+func ListDirectoryContents(ctx context.Context, client *github.Client, owner, repo, path, ref string) ([]*github.RepositoryContent, error) {
+	opts := &github.RepositoryContentGetOptions{Ref: ref}
+	for {
+		_, dirContent, resp, err := client.Repositories.GetContents(ctx, owner, repo, path, opts)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if resp != nil && resp.StatusCode == 404 {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("listing %s in %s/%s: %w", path, owner, repo, err)
+		}
+		return dirContent, nil
+	}
+}
+
+// GetBranchProtection fetches branch protection rules.
+// Returns (nil, statusCode, nil) when the API returns a non-retryable HTTP error
+// so callers can inspect the status code (e.g. 404 = not enabled, 403 = plan limit).
+// Rate limit errors are retried after waiting for the reset window.
+func GetBranchProtection(ctx context.Context, client *github.Client, owner, repo, branch string) (*github.Protection, int, error) {
+	for {
+		protection, resp, err := client.Repositories.GetBranchProtection(ctx, owner, repo, branch)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if resp != nil {
+				return nil, resp.StatusCode, nil
+			}
+			return nil, 0, fmt.Errorf("fetching branch protection for %s/%s:%s: %w", owner, repo, branch, err)
+		}
+		return protection, 0, nil
+	}
+}
+
+// ListCollaborators returns all collaborators for a repository with the given affiliation.
+// Rate limit errors are retried after waiting for the reset window.
+func ListCollaborators(ctx context.Context, client *github.Client, owner, repo, affiliation string) ([]*github.User, int, error) {
+	opts := &github.ListCollaboratorsOptions{
+		Affiliation: affiliation,
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	var all []*github.User
+	for {
+		collabs, resp, err := client.Repositories.ListCollaborators(ctx, owner, repo, opts)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if resp != nil {
+				return nil, resp.StatusCode, nil
+			}
+			return nil, 0, fmt.Errorf("listing collaborators for %s/%s: %w", owner, repo, err)
+		}
+		all = append(all, collabs...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return all, 0, nil
+}
+
+// waitForRateLimit checks if err is a rate limit error and, if so, blocks until
+// the reset time (plus one second) or the context is cancelled.
+// Returns true if the caller should retry, false otherwise.
+func waitForRateLimit(ctx context.Context, err error) bool {
+	var rle *github.RateLimitError
+	if !errors.As(err, &rle) {
+		return false
+	}
+	resetIn := max(time.Until(rle.Rate.Reset.Time), 0)
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(resetIn + time.Second):
+		return true
+	}
 }

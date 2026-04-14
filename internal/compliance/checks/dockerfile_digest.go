@@ -37,19 +37,19 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 	copy(searchPaths, dockerfilePaths)
 
 	// Check root directory for Dockerfile* files
-	_, dirContent, resp, err := client.Repositories.GetContents(ctx, repo.Owner, repo.Name, "", &github.RepositoryContentGetOptions{Ref: ref})
+	dirContent, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
 	if err != nil {
-		if resp != nil && resp.StatusCode == 404 {
-			return &compliance.Result{
-				RuleID:   rule.ID,
-				RuleName: rule.Name,
-				Repo:     repo.FullName,
-				Status:   compliance.StatusSkip,
-				Severity: rule.Severity,
-				Message:  "repository is empty",
-			}, nil
-		}
-		return nil, fmt.Errorf("listing root directory for %s: %w", repo.FullName, err)
+		return nil, err
+	}
+	if dirContent == nil {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusSkip,
+			Severity: rule.Severity,
+			Message:  "repository is empty",
+		}, nil
 	}
 	for _, entry := range dirContent {
 		name := entry.GetName()

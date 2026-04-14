@@ -27,19 +27,19 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 	ref := repo.DefaultBranch
 
 	// List workflow files
-	_, dirContent, resp, err := client.Repositories.GetContents(ctx, repo.Owner, repo.Name, ".github/workflows", &github.RepositoryContentGetOptions{Ref: ref})
+	dirContent, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, ".github/workflows", ref)
 	if err != nil {
-		if resp != nil && resp.StatusCode == 404 {
-			return &compliance.Result{
-				RuleID:   rule.ID,
-				RuleName: rule.Name,
-				Repo:     repo.FullName,
-				Status:   compliance.StatusSkip,
-				Severity: rule.Severity,
-				Message:  "no .github/workflows directory",
-			}, nil
-		}
-		return nil, fmt.Errorf("listing workflows for %s: %w", repo.FullName, err)
+		return nil, err
+	}
+	if dirContent == nil {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusSkip,
+			Severity: rule.Severity,
+			Message:  "no .github/workflows directory",
+		}, nil
 	}
 
 	var violations []string
