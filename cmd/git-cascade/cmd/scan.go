@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
@@ -47,7 +48,8 @@ var scanFlags struct {
 	issueRepo      string
 	issueLabels    []string
 
-	verbose bool
+	concurrency int
+	silent      bool
 }
 
 func init() {
@@ -89,14 +91,16 @@ func init() {
 	f.StringVar(&scanFlags.issueRepo, "issue-repo", "", "owner/repo for consolidated issue (mode=compliance)")
 	f.StringSliceVar(&scanFlags.issueLabels, "issue-label", nil, "Labels to apply to created issues (repeatable)")
 
-	f.BoolVar(&scanFlags.verbose, "verbose", false, "Enable verbose logging")
+	f.IntVar(&scanFlags.concurrency, "concurrency", 0, "Number of concurrent checks (default 5, or GIT_CASCADE_CONCURRENCY)")
+	f.BoolVar(&scanFlags.silent, "silent", false, "Suppress progress logging")
 
 	_ = scanCmd.MarkFlagRequired("org")
 }
 
 var scanCmd = &cobra.Command{
-	Use:   "scan",
-	Short: "Scan organization repositories for compliance",
+	Use:          "scan",
+	Short:        "Scan organization repositories for compliance",
+	SilenceUsage: true,
 	Long: `Scan all repositories in a GitHub organization against compliance rules.
 
 Rules are loaded from the compliance repository in your organization by default,
@@ -136,9 +140,9 @@ Examples:
 func runScan(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	logLevel := slog.LevelWarn
-	if scanFlags.verbose {
-		logLevel = slog.LevelDebug
+	logLevel := slog.LevelInfo
+	if scanFlags.silent {
+		logLevel = slog.LevelWarn
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
 
@@ -196,7 +200,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 	logger.Info("repositories after filtering", "count", len(repos))
 
 	// Run compliance checks
-	engine := compliance.NewEngine(client, cfg, logger)
+	concurrency := scanFlags.concurrency
+	if concurrency <= 0 {
+		if v := os.Getenv("GIT_CASCADE_CONCURRENCY"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				concurrency = n
+			}
+		}
+	}
+	engine := compliance.NewEngine(client, cfg, logger).WithConcurrency(concurrency)
 	results, err := engine.Run(ctx, repos)
 	if err != nil {
 		return err

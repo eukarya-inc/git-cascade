@@ -96,7 +96,7 @@ func Load(path string) (*ComplianceConfig, error) {
 	return Parse(data)
 }
 
-// Parse parses YAML bytes into a ComplianceConfig.
+// Parse parses YAML bytes into a ComplianceConfig and validates it.
 func Parse(data []byte) (*ComplianceConfig, error) {
 	var cfg ComplianceConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -104,6 +104,16 @@ func Parse(data []byte) (*ComplianceConfig, error) {
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	return &cfg, nil
+}
+
+// ParsePartial parses YAML bytes without validation, for use when merging
+// multiple files where version may only be present in one of them.
+func ParsePartial(data []byte) (*ComplianceConfig, error) {
+	var cfg ComplianceConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	return &cfg, nil
 }
@@ -147,9 +157,13 @@ func LoadAll(dir string) (*ComplianceConfig, error) {
 		if ext != ".yml" && ext != ".yaml" {
 			continue
 		}
-		cfg, err := Load(filepath.Join(dir, entry.Name()))
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("loading %s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
+		}
+		cfg, err := ParsePartial(data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", entry.Name(), err)
 		}
 		if merged.Version == "" {
 			merged.Version = cfg.Version
@@ -170,8 +184,8 @@ func LoadAll(dir string) (*ComplianceConfig, error) {
 		merged.Rules = append(merged.Rules, cfg.Rules...)
 	}
 
-	if merged.Version == "" {
-		return nil, fmt.Errorf("no valid config files found in %s", dir)
+	if err := merged.Validate(); err != nil {
+		return nil, err
 	}
 	return merged, nil
 }

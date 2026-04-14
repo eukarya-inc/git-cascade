@@ -54,7 +54,7 @@ func LoadConfigFromRepo(ctx context.Context, client *github.Client, owner, repo,
 			return nil, fmt.Errorf("decoding %s: %w", filePath, err)
 		}
 
-		cfg, err := config.Parse([]byte(content))
+		cfg, err := config.ParsePartial([]byte(content))
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", filePath, err)
 		}
@@ -62,11 +62,24 @@ func LoadConfigFromRepo(ctx context.Context, client *github.Client, owner, repo,
 		if merged.Version == "" {
 			merged.Version = cfg.Version
 		}
+		merged.Scope = merged.Scope.Merge(cfg.Scope)
+		if merged.Output.Format == "" {
+			merged.Output.Format = cfg.Output.Format
+		}
+		if merged.Output.Path == "" {
+			merged.Output.Path = cfg.Output.Path
+		}
+		if !merged.Notify.Slack.Enabled {
+			merged.Notify.Slack = cfg.Notify.Slack
+		}
+		if !merged.Notify.Issues.Enabled {
+			merged.Notify.Issues = cfg.Notify.Issues
+		}
 		merged.Rules = append(merged.Rules, cfg.Rules...)
 	}
 
-	if merged.Version == "" {
-		return nil, fmt.Errorf("no valid config files found in %s/%s/%s", owner, repo, displayPath)
+	if err := merged.Validate(); err != nil {
+		return nil, err
 	}
 
 	return merged, nil

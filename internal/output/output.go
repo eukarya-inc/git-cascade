@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -56,13 +57,34 @@ func Write(w io.Writer, results []compliance.Result, opts Options) error {
 }
 
 func writeTable(w io.Writer, results []compliance.Result) error {
-	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(tw, "STATUS\tSEVERITY\tRULE\tREPO\tMESSAGE\n")
-	fmt.Fprintf(tw, "------\t--------\t----\t----\t-------\n")
+	// Group results by repo, preserving first-seen order.
+	order := make([]string, 0)
+	byRepo := make(map[string][]compliance.Result)
 	for _, r := range results {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Status, r.Severity, r.RuleID, r.Repo, r.Message)
+		if _, seen := byRepo[r.Repo]; !seen {
+			order = append(order, r.Repo)
+		}
+		byRepo[r.Repo] = append(byRepo[r.Repo], r)
 	}
-	return tw.Flush()
+	sort.Strings(order)
+
+	for i, repo := range order {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s\n", repo)
+		fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(repo)))
+
+		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		fmt.Fprintf(tw, "  STATUS\tSEVERITY\tRULE\tMESSAGE\n")
+		fmt.Fprintf(tw, "  ------\t--------\t----\t-------\n")
+		for _, r := range byRepo[repo] {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", r.Status, r.Severity, r.RuleID, r.Message)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
+	return nil
 }
 
 func writeJSON(w io.Writer, results []compliance.Result) error {

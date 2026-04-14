@@ -11,8 +11,23 @@ go install github.com/eukarya-inc/git-cascade/cmd/git-cascade@latest
 Or build from source:
 
 ```bash
-make build
+go build -o git-cascade ./cmd/git-cascade
 ```
+
+## Environment Variables
+
+All parameters can be configured via environment variables. CLI flags take precedence when both are provided.
+
+| Variable | Equivalent flag | Description |
+|----------|----------------|-------------|
+| `GIT_CASCADE_TOKEN` | `--token` | GitHub Personal Access Token |
+| `GITHUB_TOKEN` | `--token` | GitHub PAT fallback (used if `GIT_CASCADE_TOKEN` is not set) |
+| `GIT_CASCADE_APP_ID` | `--app-id` | GitHub App ID |
+| `GIT_CASCADE_INSTALLATION_ID` | `--installation-id` | GitHub App Installation ID |
+| `GIT_CASCADE_PRIVATE_KEY_PATH` | `--private-key-path` | Path to the GitHub App private key PEM file |
+| `GIT_CASCADE_SLACK_WEBHOOK` | `--slack-webhook` | Slack Incoming Webhook URL |
+| `GIT_CASCADE_SLACK_RESULTS_URL` | `--slack-results-url` | URL linked in the Slack notification (e.g. CI run URL) |
+| `GIT_CASCADE_CONCURRENCY` | `--concurrency` | Number of concurrent (rule, repo) checks (default: 5) |
 
 ## Authentication
 
@@ -20,29 +35,23 @@ git-cascade supports two authentication methods: **Personal Access Token (PAT)**
 
 ### Personal Access Token (PAT)
 
-Set via environment variable or CLI flag:
-
 ```bash
-# Environment variable
+# Via environment variable (recommended)
 export GIT_CASCADE_TOKEN=ghp_xxx
-# or
-export GITHUB_TOKEN=ghp_xxx
 
-# CLI flag
+# Via CLI flag
 git-cascade scan --org myorg --token ghp_xxx
 ```
 
 ### GitHub App
 
-Set via environment variables or CLI flags:
-
 ```bash
-# Environment variables
+# Via environment variables (recommended)
 export GIT_CASCADE_APP_ID=12345
 export GIT_CASCADE_INSTALLATION_ID=67890
 export GIT_CASCADE_PRIVATE_KEY_PATH=/path/to/key.pem
 
-# CLI flags
+# Via CLI flags
 git-cascade scan --org myorg \
   --app-id 12345 \
   --installation-id 67890 \
@@ -88,13 +97,7 @@ The GitHub App must be installed on the organization with access to the reposito
 
 ### Slack Notification
 
-For `--slack-webhook`, no additional GitHub permissions are required. You only need a [Slack Incoming Webhook URL](https://api.slack.com/messaging/webhooks).
-
-Set it via environment variable to avoid putting it in config files:
-
-```bash
-export GIT_CASCADE_SLACK_WEBHOOK=https://hooks.slack.com/services/xxx/yyy/zzz
-```
+For `--slack-webhook`, no additional GitHub permissions are required. You only need a [Slack Incoming Webhook URL](https://api.slack.com/messaging/webhooks). Set `GIT_CASCADE_SLACK_WEBHOOK` to avoid putting the URL in config files.
 
 ### Permission per Check
 
@@ -137,7 +140,7 @@ git-cascade scan --org myorg --include-repo api --include-repo web
 git-cascade scan --org myorg --exclude-repo sandbox --exclude-repo archive
 
 # Use local config instead of remote compliance repo
-git-cascade scan --org myorg --local-config ./rules/
+git-cascade scan --org myorg --local-config ./compliance/
 
 # Notify Slack after scanning
 git-cascade scan --org myorg --slack-webhook https://hooks.slack.com/services/xxx \
@@ -149,13 +152,36 @@ git-cascade scan --org myorg --issue-mode compliance
 # Post one issue per failing repository
 git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-label automated
 
-# Verbose logging
-git-cascade scan --org myorg --verbose
+# Suppress progress logging (verbose is on by default)
+git-cascade scan --org myorg --silent
+
+# Limit concurrency to avoid GitHub secondary rate limits
+git-cascade scan --org myorg --concurrency 3
 ```
 
 ## Configuration
 
-Compliance rules are defined in YAML files. By default, git-cascade loads rules from the root of the `compliance` repository in your organization. Override with `--config-repo`, `--config-path`, or `--local-config`.
+Compliance rules are defined in YAML files. By default, git-cascade loads all `.yaml`/`.yml` files from the root of the `compliance` repository in your organization. Override with `--config-repo`, `--config-path`, or `--local-config`.
+
+### Splitting config across multiple files
+
+You can split your configuration across multiple files in the same directory — git-cascade merges them into a single config at load time:
+
+- `version` — only needs to appear in one file; first file wins
+- `scope`, `output`, `notify` — first file that sets each field wins
+- `rules` — collected from all files (appended in filename order)
+
+A typical layout:
+
+```
+compliance/         ← root of the compliance repository
+  base.yaml         ← version, scope, output, notify
+  governance.yaml   ← readme-exists, license-exists, codeowners-exists, external-collaborators
+  security.yaml     ← branch-protection, actions-pinned, dockerfile-digest
+  dependencies.yaml ← lockfile-required, npm-ci-required, renovate-config
+```
+
+Rule-only files (e.g. `security.yaml`) do not need a `version` field.
 
 ### Config Structure
 
@@ -212,7 +238,7 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `readme-exists` | Repository must contain a README file | — |
 | `license-exists` | Repository must contain a LICENSE file | — |
 | `codeowners-exists` | CODEOWNERS must exist in `.github/`, root, or `docs/` | — |
-| `branch-protection` | Default branch must have protection rules enabled | `require_reviews`, `required_reviewers` |
+| `branch-protection` | Default branch must have protection rules enabled; skipped for private repos on free GitHub plans | `require_reviews`, `required_reviewers` |
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning | — |
@@ -231,11 +257,22 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 
 Use `--output <file>` to write results to a file. Without it, output goes to stdout.
 
-**Table** (default):
+**Table** (default) — results grouped by repository, sorted alphabetically:
 ```
-STATUS  SEVERITY  RULE               REPO        MESSAGE
-pass    warning   readme-exists      org/api     found README.md
-fail    error     branch-protection  org/web     branch protection not enabled on main
+org/api
+───────
+  STATUS  SEVERITY  RULE               MESSAGE
+  ------  --------  ----               -------
+  pass    warning   readme-exists      found README.md
+  skip    error     branch-protection  branch protection API not available (requires GitHub Pro or public repository)
+
+org/web
+───────
+  STATUS  SEVERITY  RULE               MESSAGE
+  ------  --------  ----               -------
+  pass    warning   readme-exists      found README.md
+  fail    error     branch-protection  branch protection not enabled on main
+
 ```
 
 **SARIF** — only failures are emitted. Upload with:
@@ -281,6 +318,22 @@ git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-
 ```
 
 > Requires Issues: Read & Write permission (see [Required Permissions](#required-permissions)).
+
+## Performance
+
+Checks run concurrently with a default pool of **5 workers** (`--concurrency` / `GIT_CASCADE_CONCURRENCY`). Each `(rule, repo)` pair is an independent job, dispatched repo-first so all rules for a given repository are processed in parallel rather than exhausting one rule across all repos before starting the next.
+
+5 workers is chosen to stay safely under GitHub's secondary rate limit of ~900 requests/minute per installation. If you hit rate limit errors, lower it further with `--concurrency 2` or `--concurrency 3`. Rate limit errors are automatically retried once after waiting for the reset window.
+
+Files larger than 1 MB are streamed via the Git blob download API rather than the contents API, so large lockfiles (e.g. `package-lock.json`) are handled transparently.
+
+## Result statuses
+
+| Status | Meaning |
+|--------|---------|
+| `pass` | Check passed |
+| `fail` | Check failed |
+| `skip` | Check was skipped (e.g. `branch-protection` on a private repo under a free GitHub plan) |
 
 ## Exit Codes
 

@@ -5,8 +5,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "git-cascade",
-	Short: "Scan GitHub repositories for compliance",
+	Use:          "git-cascade",
+	Short:        "Scan GitHub repositories for compliance",
+	SilenceErrors: true,
 	Long: `git-cascade scans all repositories in a GitHub organization against
 a set of compliance rules defined in YAML configuration files.
 
