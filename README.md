@@ -4,11 +4,20 @@ A CLI tool that scans all repositories in a GitHub organization for compliance a
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap eukarya-inc/tap
+brew install git-cascade
+```
+
+### Go install
+
 ```bash
 go install github.com/eukarya-inc/git-cascade/cmd/git-cascade@latest
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 go build -o git-cascade ./cmd/git-cascade
