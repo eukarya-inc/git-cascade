@@ -26,7 +26,10 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_INSTALLATION_ID` | `--installation-id` | GitHub App Installation ID |
 | `GIT_CASCADE_PRIVATE_KEY_PATH` | `--private-key-path` | Path to the GitHub App private key PEM file |
 | `GIT_CASCADE_SLACK_WEBHOOK` | `--slack-webhook` | Slack Incoming Webhook URL |
+| `GIT_CASCADE_SLACK_CHANNEL` | `--slack-channel` | Override Slack channel |
 | `GIT_CASCADE_SLACK_RESULTS_URL` | `--slack-results-url` | URL linked in the Slack notification (e.g. CI run URL) |
+| `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance` or `repo` |
+| `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated issue (mode=compliance) |
 | `GIT_CASCADE_CONCURRENCY` | `--concurrency` | Number of concurrent (rule, repo) checks (default: 5) |
 
 ## Authentication

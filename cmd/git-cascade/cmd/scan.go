@@ -233,30 +233,43 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing output: %w", err)
 	}
 
-	// Slack notification
+	// Slack notification — CLI flags > env vars > config file
 	slackCfg := cfg.Notify.Slack
 	if cmd.Flags().Changed("slack-webhook") {
 		slackCfg.Enabled = true
 		slackCfg.WebhookURL = scanFlags.slackWebhook
+	} else if v := os.Getenv("GIT_CASCADE_SLACK_WEBHOOK"); v != "" && slackCfg.WebhookURL == "" {
+		slackCfg.WebhookURL = v
 	}
 	if cmd.Flags().Changed("slack-channel") {
 		slackCfg.Channel = scanFlags.slackChannel
+	} else if v := os.Getenv("GIT_CASCADE_SLACK_CHANNEL"); v != "" && slackCfg.Channel == "" {
+		slackCfg.Channel = v
+	}
+	resultsURL := scanFlags.slackResultURL
+	if resultsURL == "" {
+		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
 	}
 	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
 		logger.Info("sending slack notification")
-		if err := notify.PostSlack(slackCfg, scanFlags.org, results, scanFlags.slackResultURL); err != nil {
+		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL); err != nil {
 			return fmt.Errorf("slack notification: %w", err)
 		}
 	}
 
-	// GitHub Issues
+	// GitHub Issues — CLI flags > env vars > config file
 	issueCfg := cfg.Notify.Issues
 	if cmd.Flags().Changed("issue-mode") {
 		issueCfg.Enabled = true
 		issueCfg.Mode = scanFlags.issueMode
+	} else if v := os.Getenv("GIT_CASCADE_ISSUE_MODE"); v != "" && issueCfg.Mode == "" {
+		issueCfg.Enabled = true
+		issueCfg.Mode = v
 	}
 	if cmd.Flags().Changed("issue-repo") {
 		issueCfg.ComplianceRepo = scanFlags.issueRepo
+	} else if v := os.Getenv("GIT_CASCADE_ISSUE_REPO"); v != "" && issueCfg.ComplianceRepo == "" {
+		issueCfg.ComplianceRepo = v
 	}
 	if cmd.Flags().Changed("issue-label") {
 		issueCfg.Labels = scanFlags.issueLabels
@@ -276,19 +289,50 @@ func runScan(cmd *cobra.Command, args []string) error {
 }
 
 func resolveCredentials() (gh.Credentials, error) {
+	// PAT: flag takes priority, then env vars (handled by CredentialsFromEnv)
 	if scanFlags.token != "" {
 		return gh.Credentials{
 			Method: gh.AuthPAT,
 			Token:  scanFlags.token,
 		}, nil
 	}
-	if scanFlags.appID != 0 {
+
+	// GitHub App: merge CLI flags with env var fallbacks so partial flag sets work
+	appID := scanFlags.appID
+	installationID := scanFlags.installationID
+	privateKeyPath := scanFlags.privateKeyPath
+	if appID == 0 {
+		if v := os.Getenv("GIT_CASCADE_APP_ID"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				appID = n
+			}
+		}
+	}
+	if installationID == 0 {
+		if v := os.Getenv("GIT_CASCADE_INSTALLATION_ID"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				installationID = n
+			}
+		}
+	}
+	if privateKeyPath == "" {
+		privateKeyPath = os.Getenv("GIT_CASCADE_PRIVATE_KEY_PATH")
+	}
+	if appID != 0 || installationID != 0 || privateKeyPath != "" {
+		// At least one App field was set — validate all three are present
+		if appID == 0 || installationID == 0 || privateKeyPath == "" {
+			return gh.Credentials{}, fmt.Errorf(
+				"GitHub App auth requires --app-id, --installation-id, and --private-key-path (or their env var equivalents)",
+			)
+		}
 		return gh.Credentials{
 			Method:         gh.AuthGitHubApp,
-			AppID:          scanFlags.appID,
-			InstallationID: scanFlags.installationID,
-			PrivateKeyPath: scanFlags.privateKeyPath,
+			AppID:          appID,
+			InstallationID: installationID,
+			PrivateKeyPath: privateKeyPath,
 		}, nil
 	}
+
+	// Fall back to env-only resolution (PAT via GIT_CASCADE_TOKEN / GITHUB_TOKEN)
 	return gh.CredentialsFromEnv()
 }
