@@ -1,0 +1,21 @@
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    description: Default branch must have branch protection rules enabled
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      required_reviewers: "1"
+
+  - id: actions-pinned
+    name: Actions Pinned to SHA
+    description: All GitHub Actions in workflows must use pinned SHA references instead of tags
+    severity: error
+    enabled: true
+
+  - id: dockerfile-digest
+    name: Dockerfile Digest Pinning
+    description: Dockerfile FROM images must use SHA256 digest pinning (not :latest or tags)
+    severity: error
+    enabled: true

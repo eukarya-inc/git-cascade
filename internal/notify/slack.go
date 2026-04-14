@@ -32,7 +32,9 @@ type slackText struct {
 // PostSlack sends a scan summary to a Slack Incoming Webhook.
 // The webhook URL is resolved from cfg.WebhookURL, falling back to
 // the GIT_CASCADE_SLACK_WEBHOOK environment variable.
-func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result) error {
+// resultsURL is an optional runtime value (e.g. a GitHub Actions run URL) linked
+// in the notification; supply an empty string to omit it.
+func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string) error {
 	webhookURL := cfg.WebhookURL
 	if webhookURL == "" {
 		webhookURL = os.Getenv("GIT_CASCADE_SLACK_WEBHOOK")
@@ -55,8 +57,11 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result) 
 	summaryText := fmt.Sprintf("Scanned *%d* checks: *%d* passed, *%d* warnings, *%d* errors",
 		total, passes, warnings, errors)
 
-	if cfg.ResultsURL != "" {
-		summaryText += fmt.Sprintf("\n<%s|View full results>", cfg.ResultsURL)
+	if resultsURL == "" {
+		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
+	}
+	if resultsURL != "" {
+		summaryText += fmt.Sprintf("\n<%s|View full results>", resultsURL)
 	}
 
 	// Group failures by repo

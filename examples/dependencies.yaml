@@ -1,0 +1,21 @@
+rules:
+  - id: lockfile-required
+    name: Lockfile Required
+    description: Projects with package manifests must have corresponding lockfiles committed
+    severity: error
+    enabled: true
+
+  - id: npm-ci-required
+    name: npm ci in CI
+    description: CI workflows must use "npm ci" instead of "npm install" to respect lockfiles
+    severity: warning
+    enabled: true
+
+  - id: renovate-config
+    name: Renovate Configuration
+    description: Repository must have Renovate configured extending the shared preset with cooldown
+    severity: warning
+    enabled: true
+    params:
+      extends: "github>reearth/renovate-config"
+      min_stability_days: "7"

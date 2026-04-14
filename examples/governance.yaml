@@ -1,0 +1,24 @@
+rules:
+  - id: readme-exists
+    name: README Exists
+    description: Repository must contain a README file
+    severity: warning
+    enabled: true
+
+  - id: license-exists
+    name: License Exists
+    description: Repository must contain a LICENSE file
+    severity: warning
+    enabled: true
+
+  - id: codeowners-exists
+    name: CODEOWNERS Exists
+    description: Repository must have a CODEOWNERS file in .github/, root, or docs/
+    severity: warning
+    enabled: true
+
+  - id: external-collaborators
+    name: External Collaborators
+    description: Admin privileges must be restricted to org members only (no external admin collaborators)
+    severity: error
+    enabled: true

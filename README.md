@@ -181,8 +181,9 @@ notify:
     enabled: false
     # webhook_url is better set via GIT_CASCADE_SLACK_WEBHOOK env var
     webhook_url: ""
-    results_url: ""     # Optional link included in the Slack message
     channel: ""         # Overrides the webhook's default channel
+    # results_url is a runtime value — pass it via --slack-results-url flag
+    # or GIT_CASCADE_SLACK_RESULTS_URL env var, not in the config file
   issues:
     enabled: false
     mode: compliance    # compliance = one consolidated issue | repo = one issue per failing repo

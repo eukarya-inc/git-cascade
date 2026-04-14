@@ -37,11 +37,10 @@ type SlackConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 	// WebhookURL is the Incoming Webhook URL. Prefer the GIT_CASCADE_SLACK_WEBHOOK env var.
 	WebhookURL string `yaml:"webhook_url,omitempty"`
-	// ResultsURL is an optional permalink included in the notification body
-	// (e.g. a link to a CI artifact or a GitHub Actions run URL).
-	ResultsURL string `yaml:"results_url,omitempty"`
 	// Channel overrides the default channel configured on the webhook (optional).
 	Channel string `yaml:"channel,omitempty"`
+	// ResultsURL is not stored in config — it is always a runtime value supplied
+	// via --slack-results-url flag or GIT_CASCADE_SLACK_RESULTS_URL env var.
 }
 
 // IssuesConfig configures GitHub Issues posting.

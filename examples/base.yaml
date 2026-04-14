@@ -1,0 +1,29 @@
+version: "1"
+
+scope:
+  include_public: true
+  include_private: true
+  include_archived: false
+  # include_repos:
+  #   - api
+  #   - web
+  exclude_repos:
+    - sandbox
+
+output:
+  format: table      # table | json | csv | sarif
+  # path: results.sarif
+
+notify:
+  slack:
+    enabled: false
+    # webhook_url: https://hooks.slack.com/services/xxx  # prefer GIT_CASCADE_SLACK_WEBHOOK env var
+    # channel: "#compliance"
+    # results_url is a runtime value — use --slack-results-url flag or GIT_CASCADE_SLACK_RESULTS_URL env var
+  issues:
+    enabled: false
+    mode: compliance   # compliance (one consolidated issue) | repo (one issue per failing repo)
+    # compliance_repo: myorg/compliance  # defaults to <org>/compliance
+    labels:
+      - compliance
+      - automated
