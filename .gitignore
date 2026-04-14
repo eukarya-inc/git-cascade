@@ -1,5 +1,4 @@
 # Binaries
-git-cascade
 *.exe
 *.exe~
 *.dll
