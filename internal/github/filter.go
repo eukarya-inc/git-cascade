@@ -6,9 +6,10 @@ import (
 
 // RepoFilter controls which repositories are included in a scan.
 type RepoFilter struct {
-	IncludePublic  bool
-	IncludePrivate bool
+	IncludePublic   bool
+	IncludePrivate  bool
 	IncludeArchived bool
+	IncludeForked   bool
 	// IncludeRepos, when non-empty, restricts the scan to only these repos (by name).
 	// All other filters are ignored when this is set.
 	IncludeRepos []string
@@ -17,12 +18,13 @@ type RepoFilter struct {
 }
 
 // RepoFilterFromScope creates a RepoFilter from a config Scope, applying
-// sensible defaults (include public & private, exclude archived).
+// sensible defaults (include public & private, exclude archived and forked).
 func RepoFilterFromScope(scope config.Scope) RepoFilter {
 	return RepoFilter{
 		IncludePublic:   config.BoolDefault(scope.IncludePublic, true),
 		IncludePrivate:  config.BoolDefault(scope.IncludePrivate, true),
 		IncludeArchived: config.BoolDefault(scope.IncludeArchived, false),
+		IncludeForked:   config.BoolDefault(scope.IncludeForked, false),
 		IncludeRepos:    scope.IncludeRepos,
 		ExcludeRepos:    scope.ExcludeRepos,
 	}
@@ -55,6 +57,9 @@ func (f RepoFilter) applyFilters(repos []Repository) []Repository {
 			continue
 		}
 		if !f.IncludeArchived && r.Archived {
+			continue
+		}
+		if !f.IncludeForked && r.Fork {
 			continue
 		}
 		if !f.IncludePublic && !r.Private {

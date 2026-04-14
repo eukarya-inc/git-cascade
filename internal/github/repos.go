@@ -19,6 +19,7 @@ type Repository struct {
 	DefaultBranch string
 	Archived      bool
 	Private       bool
+	Fork          bool
 }
 
 // ListOrgRepos returns all repositories for a given GitHub organization.
@@ -45,6 +46,7 @@ func ListOrgRepos(ctx context.Context, client *github.Client, org string) ([]Rep
 				DefaultBranch: r.GetDefaultBranch(),
 				Archived:      r.GetArchived(),
 				Private:       r.GetPrivate(),
+				Fork:          r.GetFork(),
 			})
 		}
 		if resp.NextPage == 0 {
@@ -119,18 +121,14 @@ func ListDirectoryContents(ctx context.Context, client *github.Client, owner, re
 	}
 }
 
-// ListRepositoryRulesets returns all active rulesets for a repository,
-// including those inherited from the organization or enterprise.
+// GetBranchRules returns the effective rules active on a branch, merged from
+// all applicable rulesets (repository, organization, enterprise).
+// Returns (nil, statusCode, nil) for non-retryable HTTP errors so callers can
+// inspect the status code (404 = no rules, 403 = plan/permission limit).
 // Rate limit errors are retried after waiting for the reset window.
-func ListRepositoryRulesets(ctx context.Context, client *github.Client, owner, repo string) ([]*github.RepositoryRuleset, int, error) {
-	includeParents := true
-	opts := &github.RepositoryListRulesetsOptions{
-		IncludesParents: &includeParents,
-		ListOptions:     github.ListOptions{PerPage: 100},
-	}
-	var all []*github.RepositoryRuleset
+func GetBranchRules(ctx context.Context, client *github.Client, owner, repo, branch string) (*github.BranchRules, int, error) {
 	for {
-		rulesets, resp, err := client.Repositories.GetAllRulesets(ctx, owner, repo, opts)
+		rules, resp, err := client.Repositories.GetRulesForBranch(ctx, owner, repo, branch, nil)
 		if err != nil {
 			if waitForRateLimit(ctx, err) {
 				continue
@@ -138,15 +136,10 @@ func ListRepositoryRulesets(ctx context.Context, client *github.Client, owner, r
 			if resp != nil {
 				return nil, resp.StatusCode, nil
 			}
-			return nil, 0, fmt.Errorf("listing rulesets for %s/%s: %w", owner, repo, err)
+			return nil, 0, fmt.Errorf("fetching branch rules for %s/%s:%s: %w", owner, repo, branch, err)
 		}
-		all = append(all, rulesets...)
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+		return rules, 0, nil
 	}
-	return all, 0, nil
 }
 
 // GetBranchProtection fetches branch protection rules.

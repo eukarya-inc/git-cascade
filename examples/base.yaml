@@ -4,6 +4,7 @@ scope:
   include_public: true
   include_private: false
   include_archived: false
+  include_forked: false
   # include_repos:
   #   - api
   #   - web

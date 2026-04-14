@@ -13,6 +13,7 @@ func testRepos() []Repository {
 		{Name: "docs", FullName: "org/docs", Private: false},
 		{Name: "infra", FullName: "org/infra", Private: true},
 		{Name: "old-service", FullName: "org/old-service", Private: true, Archived: true},
+		{Name: "forked-lib", FullName: "org/forked-lib", Private: false, Fork: true},
 	}
 }
 
@@ -81,6 +82,20 @@ func TestFilterIncludeReposOverridesExclude(t *testing.T) {
 	}
 	got := repoNames(f.Apply(testRepos()))
 	want := []string{"api", "web"}
+	assertNames(t, got, want)
+}
+
+func TestFilterExcludeForked(t *testing.T) {
+	f := RepoFilter{IncludePublic: true, IncludePrivate: true, IncludeForked: false}
+	got := repoNames(f.Apply(testRepos()))
+	want := []string{"api", "web", "docs", "infra"}
+	assertNames(t, got, want)
+}
+
+func TestFilterIncludeForked(t *testing.T) {
+	f := RepoFilter{IncludePublic: true, IncludePrivate: true, IncludeForked: true}
+	got := repoNames(f.Apply(testRepos()))
+	want := []string{"api", "web", "docs", "infra", "forked-lib"}
 	assertNames(t, got, want)
 }
 

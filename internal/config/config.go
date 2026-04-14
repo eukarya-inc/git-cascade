@@ -59,13 +59,14 @@ type IssuesConfig struct {
 }
 
 // Scope defines which repositories are targeted by the compliance scan.
-// When omitted, defaults to scanning all public and private repos, excluding archived.
+// When omitted, defaults to scanning all public and private repos, excluding archived and forked.
 type Scope struct {
-	IncludePublic  *bool    `yaml:"include_public,omitempty"`
-	IncludePrivate *bool    `yaml:"include_private,omitempty"`
-	IncludeArchived *bool   `yaml:"include_archived,omitempty"`
-	IncludeRepos   []string `yaml:"include_repos,omitempty"`
-	ExcludeRepos   []string `yaml:"exclude_repos,omitempty"`
+	IncludePublic   *bool    `yaml:"include_public,omitempty"`
+	IncludePrivate  *bool    `yaml:"include_private,omitempty"`
+	IncludeArchived *bool    `yaml:"include_archived,omitempty"`
+	IncludeForked   *bool    `yaml:"include_forked,omitempty"`
+	IncludeRepos    []string `yaml:"include_repos,omitempty"`
+	ExcludeRepos    []string `yaml:"exclude_repos,omitempty"`
 }
 
 // Rule defines a single compliance check.
@@ -202,6 +203,9 @@ func (s Scope) Merge(other Scope) Scope {
 	}
 	if other.IncludeArchived != nil {
 		out.IncludeArchived = other.IncludeArchived
+	}
+	if other.IncludeForked != nil {
+		out.IncludeForked = other.IncludeForked
 	}
 	out.IncludeRepos = append(out.IncludeRepos, other.IncludeRepos...)
 	out.ExcludeRepos = append(out.ExcludeRepos, other.ExcludeRepos...)

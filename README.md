@@ -206,10 +206,11 @@ scope:
   include_public: true
   include_private: true
   include_archived: false
-  include_repos:        # Only scan these repos (overrides all other scope filters)
+  include_forked: false  # Exclude forked repositories (default: false)
+  include_repos:         # Only scan these repos (overrides all other scope filters)
     - api
     - web
-  exclude_repos:        # Skip these repos
+  exclude_repos:         # Skip these repos
     - sandbox
 
 output:
