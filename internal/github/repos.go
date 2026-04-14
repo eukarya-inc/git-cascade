@@ -119,6 +119,36 @@ func ListDirectoryContents(ctx context.Context, client *github.Client, owner, re
 	}
 }
 
+// ListRepositoryRulesets returns all active rulesets for a repository,
+// including those inherited from the organization or enterprise.
+// Rate limit errors are retried after waiting for the reset window.
+func ListRepositoryRulesets(ctx context.Context, client *github.Client, owner, repo string) ([]*github.RepositoryRuleset, int, error) {
+	includeParents := true
+	opts := &github.RepositoryListRulesetsOptions{
+		IncludesParents: &includeParents,
+		ListOptions:     github.ListOptions{PerPage: 100},
+	}
+	var all []*github.RepositoryRuleset
+	for {
+		rulesets, resp, err := client.Repositories.GetAllRulesets(ctx, owner, repo, opts)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if resp != nil {
+				return nil, resp.StatusCode, nil
+			}
+			return nil, 0, fmt.Errorf("listing rulesets for %s/%s: %w", owner, repo, err)
+		}
+		all = append(all, rulesets...)
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return all, 0, nil
+}
+
 // GetBranchProtection fetches branch protection rules.
 // Returns (nil, statusCode, nil) when the API returns a non-retryable HTTP error
 // so callers can inspect the status code (e.g. 404 = not enabled, 403 = plan limit).
