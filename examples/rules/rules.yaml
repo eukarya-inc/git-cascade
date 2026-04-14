@@ -1,0 +1,96 @@
+version: "1"
+
+scope:
+  include_public: true
+  include_private: true
+  include_archived: false
+  # include_repos:
+  #   - api
+  #   - web
+  exclude_repos:
+    - sandbox
+
+output:
+  format: table      # table | json | csv | sarif
+  # path: results.sarif
+
+notify:
+  slack:
+    enabled: false
+    # webhook_url: https://hooks.slack.com/services/xxx  # prefer GIT_CASCADE_SLACK_WEBHOOK env var
+    # results_url: https://github.com/myorg/compliance/actions/runs/123
+    # channel: "#compliance"
+  issues:
+    enabled: false
+    mode: compliance   # compliance (one consolidated issue) | repo (one issue per failing repo)
+    # compliance_repo: myorg/compliance  # defaults to <org>/compliance
+    labels:
+      - compliance
+      - automated
+
+rules:
+  - id: readme-exists
+    name: README Exists
+    description: Repository must contain a README file
+    severity: warning
+    enabled: true
+
+  - id: license-exists
+    name: License Exists
+    description: Repository must contain a LICENSE file
+    severity: warning
+    enabled: true
+
+  - id: codeowners-exists
+    name: CODEOWNERS Exists
+    description: Repository must have a CODEOWNERS file in .github/, root, or docs/
+    severity: warning
+    enabled: true
+
+  - id: branch-protection
+    name: Branch Protection
+    description: Default branch must have branch protection rules enabled
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      required_reviewers: "1"
+
+  - id: actions-pinned
+    name: Actions Pinned to SHA
+    description: All GitHub Actions in workflows must use pinned SHA references instead of tags
+    severity: error
+    enabled: true
+
+  - id: lockfile-required
+    name: Lockfile Required
+    description: Projects with package manifests must have corresponding lockfiles committed
+    severity: error
+    enabled: true
+
+  - id: dockerfile-digest
+    name: Dockerfile Digest Pinning
+    description: Dockerfile FROM images must use SHA256 digest pinning (not :latest or tags)
+    severity: error
+    enabled: true
+
+  - id: npm-ci-required
+    name: npm ci in CI
+    description: CI workflows must use "npm ci" instead of "npm install" to respect lockfiles
+    severity: warning
+    enabled: true
+
+  - id: renovate-config
+    name: Renovate Configuration
+    description: Repository must have Renovate configured extending the shared preset with cooldown
+    severity: warning
+    enabled: true
+    params:
+      extends: "github>reearth/renovate-config"
+      min_stability_days: "7"
+
+  - id: external-collaborators
+    name: External Collaborators
+    description: Admin privileges must be restricted to org members only (no external admin collaborators)
+    severity: error
+    enabled: true

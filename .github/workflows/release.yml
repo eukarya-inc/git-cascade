@@ -1,0 +1,223 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - target: darwin-amd64
+            os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - target: darwin-arm64
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          go build \
+            -ldflags "-X github.com/eukarya-inc/git-cascade/cmd/git-cascade/cmd.Version=${TAG}" \
+            -o git-cascade \
+            ./cmd/git-cascade
+
+      - name: Package
+        shell: bash
+        run: |
+          BINARY=git-cascade
+          TAG=${GITHUB_REF#refs/tags/}
+          ARCHIVE="${BINARY}-${TAG}-${{ matrix.target }}"
+
+          mkdir -p "${ARCHIVE}"
+          cp "${BINARY}" "${ARCHIVE}/"
+          cp LICENSE README.md "${ARCHIVE}/"
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          echo "ARCHIVE=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Collect archives
+        run: |
+          mkdir -p release-assets
+          cp artifacts/**/*.tar.gz release-assets/
+
+      - name: Compute SHA256 checksums
+        run: |
+          cd release-assets
+          sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/checksums.txt
+
+  homebrew:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ vars.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: eukarya-inc
+          repositories: homebrew-tap
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: "darwin-*"
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: "linux-*"
+
+      - name: Generate Homebrew formula
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          REPO="eukarya-inc/git-cascade"
+
+          SHA_MAC_X86=$(sha256sum artifacts/darwin-amd64/*.tar.gz | awk '{print $1}')
+          SHA_MAC_ARM=$(sha256sum artifacts/darwin-arm64/*.tar.gz | awk '{print $1}')
+          SHA_LINUX_X86=$(sha256sum artifacts/linux-amd64/*.tar.gz | awk '{print $1}')
+          SHA_LINUX_ARM=$(sha256sum artifacts/linux-arm64/*.tar.gz | awk '{print $1}')
+
+          cat > git-cascade.rb <<'FORMULA'
+          class GitCascade < Formula
+            desc "Scan GitHub organization repositories for compliance against YAML-defined rules"
+            homepage "https://github.com/eukarya-inc/git-cascade"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.intel?
+                url "https://github.com/REPO/releases/download/TAG/git-cascade-TAG-darwin-amd64.tar.gz"
+                sha256 "SHA_MAC_X86"
+              end
+              if Hardware::CPU.arm?
+                url "https://github.com/REPO/releases/download/TAG/git-cascade-TAG-darwin-arm64.tar.gz"
+                sha256 "SHA_MAC_ARM"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel?
+                url "https://github.com/REPO/releases/download/TAG/git-cascade-TAG-linux-amd64.tar.gz"
+                sha256 "SHA_LINUX_X86"
+              end
+              if Hardware::CPU.arm?
+                url "https://github.com/REPO/releases/download/TAG/git-cascade-TAG-linux-arm64.tar.gz"
+                sha256 "SHA_LINUX_ARM"
+              end
+            end
+
+            def install
+              bin.install "git-cascade"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/git-cascade version")
+            end
+          end
+          FORMULA
+
+          # Remove heredoc indentation and substitute placeholders
+          sed -i 's/^          //' git-cascade.rb
+          sed -i "s|REPO|${REPO}|g" git-cascade.rb
+          sed -i "s|TAG|${TAG}|g" git-cascade.rb
+          sed -i "s|SHA_MAC_X86|${SHA_MAC_X86}|g" git-cascade.rb
+          sed -i "s|SHA_MAC_ARM|${SHA_MAC_ARM}|g" git-cascade.rb
+          sed -i "s|SHA_LINUX_X86|${SHA_LINUX_X86}|g" git-cascade.rb
+          sed -i "s|SHA_LINUX_ARM|${SHA_LINUX_ARM}|g" git-cascade.rb
+
+          cat git-cascade.rb
+
+      - name: Push to Homebrew tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/eukarya-inc/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp git-cascade.rb tap/Formula/git-cascade.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG=${GITHUB_REF#refs/tags/}
+          git add Formula/git-cascade.rb
+          git diff --cached --quiet || {
+            git commit -m "Update git-cascade to ${TAG}"
+            git push
+          }
