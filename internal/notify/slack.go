@@ -62,7 +62,7 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
 	}
 
-	// Count failures for the summary line.
+	// Count failures for the inline failure list below.
 	var failCount int
 	byRepo := groupByRepo(results)
 	for _, repoResults := range byRepo {
@@ -71,9 +71,6 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 				failCount++
 			}
 		}
-	}
-	if failCount > 0 {
-		summaryText += fmt.Sprintf("\n*%d* failure%s", failCount, map[bool]string{true: "", false: "s"}[failCount == 1])
 	}
 	if resultsURL != "" {
 		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)

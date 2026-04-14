@@ -271,7 +271,7 @@ func countRepos(results []compliance.Result) int {
 func filterFailed(results []compliance.Result) []compliance.Result {
 	var out []compliance.Result
 	for _, r := range results {
-		if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
+		if r.Status == compliance.StatusFail && (r.Severity == config.SeverityError || r.Severity == config.SeverityWarning) {
 			out = append(out, r)
 		}
 	}
