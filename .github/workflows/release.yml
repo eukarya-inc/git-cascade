@@ -160,6 +160,7 @@ jobs:
           class GitCascade < Formula
             desc "Scan GitHub organization repositories for compliance against YAML-defined rules"
             homepage "https://github.com/eukarya-inc/git-cascade"
+            version "VERSION"
             license "MIT"
 
             on_macos do
@@ -197,6 +198,7 @@ jobs:
           # Remove heredoc indentation and substitute placeholders
           sed -i 's/^          //' git-cascade.rb
           sed -i "s|REPO|${REPO}|g" git-cascade.rb
+          sed -i "s|VERSION|${VERSION}|g" git-cascade.rb
           sed -i "s|TAG|${TAG}|g" git-cascade.rb
           sed -i "s|SHA_MAC_X86|${SHA_MAC_X86}|g" git-cascade.rb
           sed -i "s|SHA_MAC_ARM|${SHA_MAC_ARM}|g" git-cascade.rb
