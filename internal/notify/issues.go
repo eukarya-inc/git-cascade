@@ -11,38 +11,47 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-const issueTitle = "git-cascade compliance findings"
-const issueTitlePerRepo = "git-cascade compliance findings"
+const issueTitle = "[COMPLIANCE] Compliance findings"
+const issueTitlePerRepo = "[COMPLIANCE] Compliance findings"
 const gitCascadeMarker = "<!-- git-cascade -->"
+
+// githubMaxBodyLen is GitHub's hard limit for issue bodies and comments.
+const githubMaxBodyLen = 65536
 
 // PostIssues creates or updates GitHub Issues with scan findings.
 // mode="compliance": one consolidated issue in the compliance repo.
 // mode="repo":       one issue per scanned repo that has failures, posted in that repo.
-func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result) error {
+// Returns the HTML URL of the upserted issue for mode=compliance (empty string for mode=repo).
+func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result) (string, error) {
 	switch cfg.Mode {
 	case "repo":
-		return postPerRepoIssues(ctx, client, cfg, results)
+		return "", postPerRepoIssues(ctx, client, cfg, results)
 	case "compliance", "":
 		return postConsolidatedIssue(ctx, client, cfg, org, results)
 	default:
-		return fmt.Errorf("unknown issues mode %q (must be \"compliance\" or \"repo\")", cfg.Mode)
+		return "", fmt.Errorf("unknown issues mode %q (must be \"compliance\" or \"repo\")", cfg.Mode)
 	}
 }
 
 // postConsolidatedIssue creates or updates a single issue in the compliance repo
 // containing all findings grouped by repository.
-func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result) error {
+// Returns the HTML URL of the created/updated issue.
+func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result) (string, error) {
 	repoRef := cfg.ComplianceRepo
 	if repoRef == "" {
 		repoRef = org + "/compliance"
 	}
 	owner, repo, err := splitRepo(repoRef)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	body := buildConsolidatedBody(org, results)
-	return upsertIssue(ctx, client, owner, repo, issueTitle, body, cfg.Labels)
+	url, err := upsertIssue(ctx, client, owner, repo, issueTitle, body, cfg.Labels)
+	if err != nil {
+		return "", err
+	}
+	return url, nil
 }
 
 // postPerRepoIssues creates or updates one issue per repository that has failures.
@@ -58,7 +67,7 @@ func postPerRepoIssues(ctx context.Context, client *github.Client, cfg config.Is
 			return err
 		}
 		body := buildPerRepoBody(repoFull, failures)
-		if err := upsertIssue(ctx, client, owner, repo, issueTitlePerRepo, body, cfg.Labels); err != nil {
+		if _, err := upsertIssue(ctx, client, owner, repo, issueTitlePerRepo, body, cfg.Labels); err != nil { //nolint:errcheck
 			return fmt.Errorf("posting issue to %s: %w", repoFull, err)
 		}
 	}
@@ -67,36 +76,84 @@ func postPerRepoIssues(ctx context.Context, client *github.Client, cfg config.Is
 
 // upsertIssue finds an open issue with the given title and marker and updates it,
 // or creates a new one if none exists.
-func upsertIssue(ctx context.Context, client *github.Client, owner, repo, title, body string, labels []string) error {
+// If the body exceeds GitHub's limit it is split into batches: the first batch
+// goes into the issue body, subsequent batches are posted as comments.
+// Stale overflow comments from previous runs are deleted before new ones are added.
+// Returns the HTML URL of the created/updated issue.
+func upsertIssue(ctx context.Context, client *github.Client, owner, repo, title, body string, labels []string) (string, error) {
+	batches := splitIntoBatches(body)
+
 	existing, err := findExistingIssue(ctx, client, owner, repo, title)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	ghLabels := make([]*github.Label, len(labels))
-	for i, l := range labels {
-		name := l
-		ghLabels[i] = &github.Label{Name: &name}
-	}
+	var issueNumber int
+	var htmlURL string
 
 	if existing != nil {
-		_, _, err = client.Issues.Edit(ctx, owner, repo, existing.GetNumber(), &github.IssueRequest{
-			Body: &body,
+		issueNumber = existing.GetNumber()
+		htmlURL = existing.GetHTMLURL()
+		_, _, err = client.Issues.Edit(ctx, owner, repo, issueNumber, &github.IssueRequest{
+			Body: &batches[0],
 		})
 		if err != nil {
-			return fmt.Errorf("updating issue #%d in %s/%s: %w", existing.GetNumber(), owner, repo, err)
+			return "", fmt.Errorf("updating issue #%d in %s/%s: %w", issueNumber, owner, repo, err)
 		}
-		return nil
+		// Delete previous overflow comments so we don't accumulate stale ones.
+		if err := deleteOverflowComments(ctx, client, owner, repo, issueNumber); err != nil {
+			return "", err
+		}
+	} else {
+		if labels == nil {
+			labels = []string{}
+		}
+		issue, _, err := client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
+			Title:  &title,
+			Body:   &batches[0],
+			Labels: &labels,
+		})
+		if err != nil {
+			return "", fmt.Errorf("creating issue in %s/%s: %w", owner, repo, err)
+		}
+		issueNumber = issue.GetNumber()
+		htmlURL = issue.GetHTMLURL()
 	}
 
-	labelNames := labels
-	_, _, err = client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
-		Title:  &title,
-		Body:   &body,
-		Labels: &labelNames,
-	})
-	if err != nil {
-		return fmt.Errorf("creating issue in %s/%s: %w", owner, repo, err)
+	// Post overflow batches as comments.
+	for i, batch := range batches[1:] {
+		comment := fmt.Sprintf("<!-- git-cascade-overflow -->\n_Continued (part %d/%d)_\n\n%s", i+2, len(batches), batch)
+		if _, _, err := client.Issues.CreateComment(ctx, owner, repo, issueNumber, &github.IssueComment{
+			Body: &comment,
+		}); err != nil {
+			return "", fmt.Errorf("posting overflow comment on #%d in %s/%s: %w", issueNumber, owner, repo, err)
+		}
+	}
+
+	return htmlURL, nil
+}
+
+// deleteOverflowComments removes comments previously posted by git-cascade as overflow batches.
+func deleteOverflowComments(ctx context.Context, client *github.Client, owner, repo string, issueNumber int) error {
+	opts := &github.IssueListCommentsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	for {
+		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, issueNumber, opts)
+		if err != nil {
+			return fmt.Errorf("listing comments on #%d in %s/%s: %w", issueNumber, owner, repo, err)
+		}
+		for _, c := range comments {
+			if strings.Contains(c.GetBody(), "<!-- git-cascade-overflow -->") {
+				if _, err := client.Issues.DeleteComment(ctx, owner, repo, c.GetID()); err != nil {
+					return fmt.Errorf("deleting comment %d: %w", c.GetID(), err)
+				}
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.ListOptions.Page = resp.NextPage
 	}
 	return nil
 }
@@ -153,8 +210,8 @@ func buildConsolidatedBody(org string, results []compliance.Result) string {
 	}
 
 	passes, warnings, errors := countResults(results)
-	fmt.Fprintf(&sb, "\n---\n_Total: %d checks — %d passed, %d warnings, %d errors_\n",
-		len(results), passes, warnings, errors)
+	fmt.Fprintf(&sb, "\n---\n_Scanned %d repositories / %d checks — %d passed, %d warnings, %d errors_\n",
+		countRepos(results), len(results), passes, warnings, errors)
 	return sb.String()
 }
 
@@ -171,10 +228,40 @@ func buildPerRepoBody(repoFull string, failures []compliance.Result) string {
 	return sb.String()
 }
 
+// splitIntoBatches splits body into chunks each no longer than githubMaxBodyLen,
+// cutting at newline boundaries to avoid splitting Markdown rows.
+func splitIntoBatches(body string) []string {
+	if len(body) <= githubMaxBodyLen {
+		return []string{body}
+	}
+	var batches []string
+	for len(body) > 0 {
+		if len(body) <= githubMaxBodyLen {
+			batches = append(batches, body)
+			break
+		}
+		cut := githubMaxBodyLen
+		if idx := strings.LastIndex(body[:cut], "\n"); idx > 0 {
+			cut = idx + 1
+		}
+		batches = append(batches, body[:cut])
+		body = body[cut:]
+	}
+	return batches
+}
+
+func countRepos(results []compliance.Result) int {
+	seen := make(map[string]struct{})
+	for _, r := range results {
+		seen[r.Repo] = struct{}{}
+	}
+	return len(seen)
+}
+
 func filterFailed(results []compliance.Result) []compliance.Result {
 	var out []compliance.Result
 	for _, r := range results {
-		if r.Status == compliance.StatusFail {
+		if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
 			out = append(out, r)
 		}
 	}

@@ -233,31 +233,8 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing output: %w", err)
 	}
 
-	// Slack notification — CLI flags > env vars > config file
-	slackCfg := cfg.Notify.Slack
-	if cmd.Flags().Changed("slack-webhook") {
-		slackCfg.Enabled = true
-		slackCfg.WebhookURL = scanFlags.slackWebhook
-	} else if v := os.Getenv("GIT_CASCADE_SLACK_WEBHOOK"); v != "" && slackCfg.WebhookURL == "" {
-		slackCfg.WebhookURL = v
-	}
-	if cmd.Flags().Changed("slack-channel") {
-		slackCfg.Channel = scanFlags.slackChannel
-	} else if v := os.Getenv("GIT_CASCADE_SLACK_CHANNEL"); v != "" && slackCfg.Channel == "" {
-		slackCfg.Channel = v
-	}
-	resultsURL := scanFlags.slackResultURL
-	if resultsURL == "" {
-		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
-	}
-	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
-		logger.Info("sending slack notification")
-		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL); err != nil {
-			return fmt.Errorf("slack notification: %w", err)
-		}
-	}
-
 	// GitHub Issues — CLI flags > env vars > config file
+	// Run before Slack so the issue URL can be linked in the notification.
 	issueCfg := cfg.Notify.Issues
 	if cmd.Flags().Changed("issue-mode") {
 		issueCfg.Enabled = true
@@ -274,10 +251,42 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-label") {
 		issueCfg.Labels = scanFlags.issueLabels
 	}
+	var issueURL string
 	if issueCfg.Enabled {
 		logger.Info("posting GitHub Issues", "mode", issueCfg.Mode)
-		if err := notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results); err != nil {
+		var err error
+		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results)
+		if err != nil {
 			return fmt.Errorf("posting issues: %w", err)
+		}
+	}
+
+	// Slack notification — CLI flags > env vars > config file
+	slackCfg := cfg.Notify.Slack
+	if cmd.Flags().Changed("slack-webhook") {
+		slackCfg.Enabled = true
+		slackCfg.WebhookURL = scanFlags.slackWebhook
+	} else if v := os.Getenv("GIT_CASCADE_SLACK_WEBHOOK"); v != "" && slackCfg.WebhookURL == "" {
+		slackCfg.WebhookURL = v
+	}
+	if cmd.Flags().Changed("slack-channel") {
+		slackCfg.Channel = scanFlags.slackChannel
+	} else if v := os.Getenv("GIT_CASCADE_SLACK_CHANNEL"); v != "" && slackCfg.Channel == "" {
+		slackCfg.Channel = v
+	}
+	// If an issue URL is available, use it as the results URL (links to the issue).
+	// Otherwise fall back to the explicit --slack-results-url flag / env var.
+	resultsURL := issueURL
+	if resultsURL == "" {
+		resultsURL = scanFlags.slackResultURL
+	}
+	if resultsURL == "" {
+		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
+	}
+	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
+		logger.Info("sending slack notification")
+		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL); err != nil {
+			return fmt.Errorf("slack notification: %w", err)
 		}
 	}
 

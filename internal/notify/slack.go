@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
@@ -53,31 +52,31 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 		statusIcon = ":warning:"
 	}
 
+	totalRepos := countRepos(results)
 	headerText := fmt.Sprintf("%s *git-cascade compliance scan — %s*", statusIcon, org)
-	summaryText := fmt.Sprintf("Scanned *%d* checks: *%d* passed, *%d* warnings, *%d* errors",
+	summaryText := fmt.Sprintf("Scanned *%d* repositor%s / *%d* checks: *%d* passed, *%d* warnings, *%d* errors",
+		totalRepos, map[bool]string{true: "y", false: "ies"}[totalRepos == 1],
 		total, passes, warnings, errors)
 
 	if resultsURL == "" {
 		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
 	}
-	if resultsURL != "" {
-		summaryText += fmt.Sprintf("\n<%s|View full results>", resultsURL)
-	}
 
-	// Group failures by repo
-	var failLines []string
+	// Count failures for the summary line.
+	var failCount int
 	byRepo := groupByRepo(results)
-	for repo, repoResults := range byRepo {
-		var repoFails []string
+	for _, repoResults := range byRepo {
 		for _, r := range repoResults {
-			if r.Status == compliance.StatusFail {
-				repoFails = append(repoFails, fmt.Sprintf("  • `%s` (%s): %s", r.RuleID, r.Severity, r.Message))
+			if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
+				failCount++
 			}
 		}
-		if len(repoFails) > 0 {
-			failLines = append(failLines, fmt.Sprintf("*%s*", repo))
-			failLines = append(failLines, repoFails...)
-		}
+	}
+	if failCount > 0 {
+		summaryText += fmt.Sprintf("\n*%d* failure%s", failCount, map[bool]string{true: "", false: "s"}[failCount == 1])
+	}
+	if resultsURL != "" {
+		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)
 	}
 
 	blocks := []slackBlock{
@@ -85,12 +84,27 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 		{Type: "section", Text: &slackText{Type: "mrkdwn", Text: headerText + "\n" + summaryText}},
 	}
 
-	if len(failLines) > 0 {
+	// Only show the inline failure list when there is no issue/results URL to link to.
+	if failCount > 0 && resultsURL == "" {
+		var failLines []string
+		for repo, repoResults := range byRepo {
+			for _, r := range repoResults {
+				if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
+					failLines = append(failLines, fmt.Sprintf("• `%s`  `%s`", repo, r.RuleID))
+				}
+			}
+		}
 		blocks = append(blocks, slackBlock{Type: "divider"})
-		// Slack block text is capped at 3000 chars; truncate if needed
-		body := strings.Join(failLines, "\n")
-		if len(body) > 2900 {
-			body = body[:2900] + "\n…(truncated)"
+		body := ""
+		for _, l := range failLines {
+			if len(body)+len(l)+1 > 2900 {
+				body += "\n…(truncated)"
+				break
+			}
+			if body != "" {
+				body += "\n"
+			}
+			body += l
 		}
 		blocks = append(blocks, slackBlock{
 			Type: "section",

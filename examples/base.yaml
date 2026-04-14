@@ -2,7 +2,7 @@ version: "1"
 
 scope:
   include_public: true
-  include_private: true
+  include_private: false
   include_archived: false
   # include_repos:
   #   - api
