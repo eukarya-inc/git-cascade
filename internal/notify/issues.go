@@ -11,8 +11,8 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-const issueTitle = "[COMPLIANCE] Compliance findings"
-const issueTitlePerRepo = "[COMPLIANCE] Compliance findings"
+const issueTitle = "[COMPLIANCE] non-compliant item findings"
+const issueTitlePerRepo = "[COMPLIANCE] non-compliant item findings"
 const gitCascadeMarker = "<!-- git-cascade -->"
 
 // githubMaxBodyLen is GitHub's hard limit for issue bodies and comments.
