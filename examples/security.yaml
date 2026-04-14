@@ -19,3 +19,15 @@ rules:
     description: Dockerfile FROM images must use SHA256 digest pinning (not :latest or tags)
     severity: error
     enabled: true
+
+  - id: no-env-files
+    name: No .env Files
+    description: .env, .env.local, .env.production and similar files must not be committed (.env.example is allowed)
+    severity: error
+    enabled: true
+
+  - id: ai-config-safety
+    name: AI Config Safety
+    description: .claude/, .cursor/, and .mcp.json must not contain executable hooks or command definitions
+    severity: error
+    enabled: true
