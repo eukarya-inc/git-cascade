@@ -13,6 +13,7 @@ type Result struct {
 	RuleID   string          `json:"rule_id"`
 	RuleName string          `json:"rule_name"`
 	Repo     string          `json:"repo"`
+	Private  bool            `json:"private"`
 	Status   Status          `json:"status"`
 	Severity config.Severity `json:"severity"`
 	Message  string          `json:"message"`

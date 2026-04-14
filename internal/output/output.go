@@ -72,8 +72,15 @@ func writeTable(w io.Writer, results []compliance.Result) error {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintf(w, "%s\n", repo)
-		fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(repo)))
+
+		// Derive visibility label from the first result for this repo.
+		visibility := "public"
+		if byRepo[repo][0].Private {
+			visibility = "private"
+		}
+		header := fmt.Sprintf("%s [%s]", repo, visibility)
+		fmt.Fprintf(w, "%s\n", header)
+		fmt.Fprintf(w, "%s\n", strings.Repeat("─", len(header)))
 
 		tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 		fmt.Fprintf(tw, "  STATUS\tSEVERITY\tRULE\tMESSAGE\n")

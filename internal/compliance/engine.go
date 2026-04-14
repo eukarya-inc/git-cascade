@@ -119,11 +119,19 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 		close(outCh)
 	}()
 
+	// Build a lookup so we can stamp visibility onto results without
+	// requiring every checker to know about the repo's Private field.
+	repoPrivate := make(map[string]bool, len(repos))
+	for _, r := range repos {
+		repoPrivate[r.FullName] = r.Private
+	}
+
 	results := make([]Result, 0, len(jobs))
 	for outcome := range outCh {
 		if outcome.err != nil {
 			return nil, fmt.Errorf("compliance check failed: %w", outcome.err)
 		}
+		outcome.result.Private = repoPrivate[outcome.result.Repo]
 		results = append(results, *outcome.result)
 	}
 

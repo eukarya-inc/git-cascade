@@ -196,7 +196,8 @@ func buildConsolidatedBody(org string, results []compliance.Result) string {
 			continue
 		}
 		hasAnyFailure = true
-		fmt.Fprintf(&sb, "## `%s`\n\n", repo)
+		visibility := visibilityLabel(repoResults[0].Private)
+		fmt.Fprintf(&sb, "## `%s` %s\n\n", repo, visibility)
 		sb.WriteString("| Rule | Severity | Message |\n")
 		sb.WriteString("|------|----------|---------|\n")
 		for _, r := range failures {
@@ -218,7 +219,8 @@ func buildConsolidatedBody(org string, results []compliance.Result) string {
 func buildPerRepoBody(repoFull string, failures []compliance.Result) string {
 	var sb strings.Builder
 	sb.WriteString(gitCascadeMarker + "\n")
-	fmt.Fprintf(&sb, "# Compliance Findings — `%s`\n\n", repoFull)
+	visibility := visibilityLabel(failures[0].Private)
+	fmt.Fprintf(&sb, "# Compliance Findings — `%s` %s\n\n", repoFull, visibility)
 	fmt.Fprintf(&sb, "_Last updated: %s_\n\n", time.Now().UTC().Format(time.RFC3339))
 	sb.WriteString("| Rule | Severity | Message |\n")
 	sb.WriteString("|------|----------|---------|\n")
@@ -226,6 +228,14 @@ func buildPerRepoBody(repoFull string, failures []compliance.Result) string {
 		fmt.Fprintf(&sb, "| `%s` | %s | %s |\n", r.RuleID, r.Severity, r.Message)
 	}
 	return sb.String()
+}
+
+// visibilityLabel returns a Markdown badge for the repository visibility.
+func visibilityLabel(private bool) string {
+	if private {
+		return "![private](https://img.shields.io/badge/visibility-private-orange)"
+	}
+	return "![public](https://img.shields.io/badge/visibility-public-blue)"
 }
 
 // splitIntoBatches splits body into chunks each no longer than githubMaxBodyLen,

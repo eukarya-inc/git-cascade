@@ -275,15 +275,15 @@ Use `--output <file>` to write results to a file. Without it, output goes to std
 
 **Table** (default) — results grouped by repository, sorted alphabetically:
 ```
-org/api
-───────
+org/api [private]
+─────────────────
   STATUS  SEVERITY  RULE               MESSAGE
   ------  --------  ----               -------
   pass    warning   readme-exists      found README.md
   skip    error     branch-protection  branch protection API not available (requires GitHub Pro or public repository)
 
-org/web
-───────
+org/web [public]
+────────────────
   STATUS  SEVERITY  RULE               MESSAGE
   ------  --------  ----               -------
   pass    warning   readme-exists      found README.md
