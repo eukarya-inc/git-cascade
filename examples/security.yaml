@@ -40,6 +40,6 @@ rules:
 
   - id: no-secrets-inherit
     name: No secrets inherit
-    description: Reusable workflow calls must not use "secrets: inherit", which exposes all caller secrets violating least-privilege
+    description: 'Reusable workflow calls must not use "secrets: inherit", which exposes all caller secrets violating least-privilege'
     severity: error
     enabled: true

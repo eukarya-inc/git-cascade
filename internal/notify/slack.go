@@ -62,16 +62,6 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
 	}
 
-	// Count failures for the inline failure list below.
-	var failCount int
-	byRepo := groupByRepo(results)
-	for _, repoResults := range byRepo {
-		for _, r := range repoResults {
-			if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
-				failCount++
-			}
-		}
-	}
 	if resultsURL != "" {
 		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)
 	}
@@ -80,34 +70,6 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: fmt.Sprintf("git-cascade: %s", org)}},
 		{Type: "section", Text: &slackText{Type: "mrkdwn", Text: headerText + "\n" + summaryText}},
-	}
-
-	// Only show the inline failure list when there is no issue/results URL to link to.
-	if failCount > 0 && resultsURL == "" {
-		var failLines []string
-		for repo, repoResults := range byRepo {
-			for _, r := range repoResults {
-				if r.Status == compliance.StatusFail && r.Severity == config.SeverityError {
-					failLines = append(failLines, fmt.Sprintf("• `%s`  `%s`", repo, r.RuleID))
-				}
-			}
-		}
-		blocks = append(blocks, slackBlock{Type: "divider"})
-		body := ""
-		for _, l := range failLines {
-			if len(body)+len(l)+1 > 2900 {
-				body += "\n…(truncated)"
-				break
-			}
-			if body != "" {
-				body += "\n"
-			}
-			body += l
-		}
-		blocks = append(blocks, slackBlock{
-			Type: "section",
-			Text: &slackText{Type: "mrkdwn", Text: body},
-		})
 	}
 
 	payload := slackPayload{
