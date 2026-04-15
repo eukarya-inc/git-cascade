@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/eukarya-inc/git-cascade/internal/config"
 	"github.com/spf13/cobra"
@@ -41,30 +40,23 @@ Examples:
 }
 
 func runValidate(_ *cobra.Command, args []string) error {
-	paths := args
-
+	// --local-config: merge all files first, then validate as a unit.
 	if validateFlags.configDir != "" {
-		entries, err := os.ReadDir(validateFlags.configDir)
+		cfg, err := config.LoadAll(validateFlags.configDir)
 		if err != nil {
-			return fmt.Errorf("reading directory %s: %w", validateFlags.configDir, err)
+			fmt.Fprintf(os.Stderr, "FAIL  %s\n      %v\n", validateFlags.configDir, err)
+			return fmt.Errorf("one or more config files failed validation")
 		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			ext := filepath.Ext(e.Name())
-			if ext == ".yaml" || ext == ".yml" {
-				paths = append(paths, filepath.Join(validateFlags.configDir, e.Name()))
-			}
-		}
+		fmt.Printf("OK    %s  (%d rules)\n", validateFlags.configDir, len(cfg.Rules))
+		return nil
 	}
 
-	if len(paths) == 0 {
+	if len(args) == 0 {
 		return fmt.Errorf("no config files specified — pass file paths as arguments or use --local-config")
 	}
 
 	ok := true
-	for _, path := range paths {
+	for _, path := range args {
 		cfg, err := config.Load(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL  %s\n      %v\n", path, err)
