@@ -23,12 +23,12 @@ const githubMaxBodyLen = 65536
 // mode="repo":       one issue per scanned repo that has failures, posted in that repo.
 // ciURL is an optional link to the CI job run embedded in the issue body.
 // Returns the HTML URL of the upserted issue for mode=compliance (empty string for mode=repo).
-func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string) (string, error) {
+func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string, scope config.Scope) (string, error) {
 	switch cfg.Mode {
 	case "repo":
 		return "", postPerRepoIssues(ctx, client, cfg, results)
 	case "compliance", "":
-		return postConsolidatedIssue(ctx, client, cfg, org, results, ciURL)
+		return postConsolidatedIssue(ctx, client, cfg, org, results, ciURL, scope)
 	default:
 		return "", fmt.Errorf("unknown issues mode %q (must be \"compliance\" or \"repo\")", cfg.Mode)
 	}
@@ -37,7 +37,7 @@ func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesCon
 // postConsolidatedIssue creates or updates a single issue in the compliance repo
 // containing all findings grouped by repository.
 // Returns the HTML URL of the created/updated issue.
-func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string) (string, error) {
+func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string, scope config.Scope) (string, error) {
 	repoRef := cfg.ComplianceRepo
 	if repoRef == "" {
 		repoRef = org + "/compliance"
@@ -47,7 +47,7 @@ func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg confi
 		return "", err
 	}
 
-	body := buildConsolidatedBody(org, results, ciURL)
+	body := buildConsolidatedBody(org, results, ciURL, scope)
 	url, err := upsertIssue(ctx, client, owner, repo, issueTitle, body, cfg.Labels)
 	if err != nil {
 		return "", err
@@ -183,7 +183,7 @@ func findExistingIssue(ctx context.Context, client *github.Client, owner, repo, 
 	return nil, nil
 }
 
-func buildConsolidatedBody(org string, results []compliance.Result, ciURL string) string {
+func buildConsolidatedBody(org string, results []compliance.Result, ciURL string, scope config.Scope) string {
 	var sb strings.Builder
 	sb.WriteString(gitCascadeMarker + "\n")
 	fmt.Fprintf(&sb, "# Compliance Findings — %s\n\n", org)
@@ -219,6 +219,7 @@ func buildConsolidatedBody(org string, results []compliance.Result, ciURL string
 	passes, warnings, errors := countResults(results)
 	fmt.Fprintf(&sb, "\n---\n_Scanned %d repositories / %d checks — %d passed, %d warnings, %d errors_\n",
 		countRepos(results), len(results), passes, warnings, errors)
+	fmt.Fprintf(&sb, "_Scope: %s_\n", scopeSummary(scope))
 	return sb.String()
 }
 

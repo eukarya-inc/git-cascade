@@ -33,7 +33,7 @@ type slackText struct {
 // the GIT_CASCADE_SLACK_WEBHOOK environment variable.
 // resultsURL is an optional runtime value (e.g. a GitHub Actions run URL) linked
 // in the notification; supply an empty string to omit it.
-func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string) error {
+func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string, scope config.Scope) error {
 	webhookURL := cfg.WebhookURL
 	if webhookURL == "" {
 		webhookURL = os.Getenv("GIT_CASCADE_SLACK_WEBHOOK")
@@ -75,6 +75,7 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 	if resultsURL != "" {
 		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)
 	}
+	summaryText += fmt.Sprintf("\n_Scope: %s_", scopeSummary(scope))
 
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: fmt.Sprintf("git-cascade: %s", org)}},

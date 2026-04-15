@@ -259,7 +259,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if issueCfg.Enabled {
 		logger.Info("posting GitHub Issues", "mode", issueCfg.Mode)
 		var err error
-		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results, ciURL)
+		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results, ciURL, cfg.Scope)
 		if err != nil {
 			return fmt.Errorf("posting issues: %w", err)
 		}
@@ -286,7 +286,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
 		logger.Info("sending slack notification")
-		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL); err != nil {
+		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL, cfg.Scope); err != nil {
 			return fmt.Errorf("slack notification: %w", err)
 		}
 	}
