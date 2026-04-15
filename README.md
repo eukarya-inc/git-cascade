@@ -127,6 +127,8 @@ For `--slack-webhook`, no additional GitHub permissions are required. You only n
 | `external-collaborators` | `GET /repos/{owner}/{repo}/collaborators` | `repo` | Members: Read | Members (Org): Read |
 | `no-env-files` | `GET /repos/{owner}/{repo}/contents/` (root listing) | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `ai-config-safety` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
+| `no-pull-request-target` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
+| `no-secrets-inherit` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `--issue-mode` | `GET/POST /repos/{owner}/{repo}/issues` | `repo` | Issues: Read & Write | Issues: Read & Write |
 
 ## Usage
@@ -262,6 +264,8 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `external-collaborators` | No external collaborators may have admin privileges | — |
 | `no-env-files` | `.env`, `.env.local`, `.env.production` and other `.env.*` variants must not be committed (`.env.example` is allowed) | — |
 | `ai-config-safety` | `.claude/`, `.cursor/`, and `.mcp.json` must not contain executable hooks or command definitions | — |
+| `no-pull-request-target` | Workflows must not use `pull_request_target`, which runs in the base branch context and exposes secrets to untrusted fork code | — |
+| `no-secrets-inherit` | Reusable workflow calls must not use `secrets: inherit`, which exposes all caller secrets violating least-privilege | — |
 
 ## Output Formats
 

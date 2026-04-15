@@ -31,3 +31,15 @@ rules:
     description: .claude/, .cursor/, and .mcp.json must not contain executable hooks or command definitions
     severity: error
     enabled: true
+
+  - id: no-pull-request-target
+    name: No pull_request_target Event
+    description: Workflows must not use pull_request_target, which runs in the base branch context and exposes secrets to untrusted fork code
+    severity: error
+    enabled: true
+
+  - id: no-secrets-inherit
+    name: No secrets inherit
+    description: Reusable workflow calls must not use "secrets: inherit", which exposes all caller secrets violating least-privilege
+    severity: error
+    enabled: true
