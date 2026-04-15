@@ -251,11 +251,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("issue-label") {
 		issueCfg.Labels = scanFlags.issueLabels
 	}
+	ciURL := scanFlags.slackResultURL
+	if ciURL == "" {
+		ciURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
+	}
 	var issueURL string
 	if issueCfg.Enabled {
 		logger.Info("posting GitHub Issues", "mode", issueCfg.Mode)
 		var err error
-		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results)
+		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results, ciURL)
 		if err != nil {
 			return fmt.Errorf("posting issues: %w", err)
 		}
@@ -275,13 +279,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 		slackCfg.Channel = v
 	}
 	// If an issue URL is available, use it as the results URL (links to the issue).
-	// Otherwise fall back to the explicit --slack-results-url flag / env var.
+	// Otherwise fall back to the CI run URL.
 	resultsURL := issueURL
 	if resultsURL == "" {
-		resultsURL = scanFlags.slackResultURL
-	}
-	if resultsURL == "" {
-		resultsURL = os.Getenv("GIT_CASCADE_SLACK_RESULTS_URL")
+		resultsURL = ciURL
 	}
 	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
 		logger.Info("sending slack notification")
