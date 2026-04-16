@@ -129,6 +129,7 @@ For `--slack-webhook`, no additional GitHub permissions are required. You only n
 | `ai-config-safety` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `no-pull-request-target` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `no-secrets-inherit` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
+| `harden-runner-required` | `GET /repos/{owner}/{repo}/contents/{path}` | `public_repo` | Contents: Read | Contents: Read |
 | `--issue-mode` | `GET/POST /repos/{owner}/{repo}/issues` | `repo` | Issues: Read & Write | Issues: Read & Write |
 
 ## Usage
@@ -266,6 +267,7 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `ai-config-safety` | `.claude/`, `.cursor/`, and `.mcp.json` must not contain executable hooks or command definitions | — |
 | `no-pull-request-target` | Workflows must not use `pull_request_target`, which runs in the base branch context and exposes secrets to untrusted fork code | — |
 | `no-secrets-inherit` | Reusable workflow calls must not use `secrets: inherit`, which exposes all caller secrets violating least-privilege | — |
+| `harden-runner-required` | Every job in public repository workflows must use `step-security/harden-runner` as the first step; skipped for private repositories | — |
 
 ## Output Formats
 

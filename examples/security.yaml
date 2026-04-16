@@ -43,3 +43,9 @@ rules:
     description: 'Reusable workflow calls must not use "secrets: inherit", which exposes all caller secrets violating least-privilege'
     severity: error
     enabled: true
+
+  - id: harden-runner-required
+    name: Harden Runner Required
+    description: Every job in public repository workflows must use step-security/harden-runner as the first step
+    severity: warning
+    enabled: true

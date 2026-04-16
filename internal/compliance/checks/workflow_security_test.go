@@ -152,3 +152,194 @@ jobs:
 		})
 	}
 }
+
+// — jobsMissingHardenRunner ———————————————————————————————————————————————————
+
+func TestJobsMissingHardenRunner(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string // nil means no violations
+	}{
+		{
+			name: "single job with harden-runner as first step",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@abc123
+`,
+			want: nil,
+		},
+		{
+			name: "single job with harden-runner uses: on same line as dash",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+      - uses: actions/checkout@abc123
+`,
+			want: nil,
+		},
+		{
+			name: "single job missing harden-runner (first step is checkout)",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+      - run: go build ./...
+`,
+			want: []string{"build"},
+		},
+		{
+			name: "harden-runner present but not first step",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+`,
+			want: []string{"build"},
+		},
+		{
+			name: "multiple jobs, all compliant",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@abc123
+      - uses: actions/checkout@abc123
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@def456
+      - run: go test ./...
+`,
+			want: nil,
+		},
+		{
+			name: "multiple jobs, one missing harden-runner",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@abc123
+      - uses: actions/checkout@abc123
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+      - run: ./deploy.sh
+`,
+			want: []string{"deploy"},
+		},
+		{
+			name: "multiple jobs, all missing harden-runner",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go test ./...
+`,
+			want: []string{"build", "test"},
+		},
+		{
+			name: "job with no steps block is ignored",
+			content: `
+on: [workflow_call]
+jobs:
+  call:
+    uses: org/repo/.github/workflows/reusable.yml@main
+`,
+			want: nil,
+		},
+		{
+			name: "no jobs block at all",
+			content: `
+on: [push]
+`,
+			want: nil,
+		},
+		{
+			name: "harden-runner with SHA and inline version comment",
+			content: `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: block
+`,
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := jobsMissingHardenRunner(tt.content)
+			if len(got) == 0 && len(tt.want) == 0 {
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("jobsMissingHardenRunner() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("jobsMissingHardenRunner()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestIsHardenRunner(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1", true},
+		{"step-security/harden-runner@v2", true},
+		{"step-security/harden-runner@abc123", true},
+		{"actions/checkout@abc123", false},
+		{"step-security/other-action@abc123", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			got := isHardenRunner(tt.value)
+			if got != tt.want {
+				t.Errorf("isHardenRunner(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
