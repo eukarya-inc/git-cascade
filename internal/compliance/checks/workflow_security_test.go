@@ -321,6 +321,62 @@ jobs:
 	}
 }
 
+func TestIndentOf(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"no indent", 0},
+		{"  two spaces", 2},
+		{"    four spaces", 4},
+		{"      six spaces", 6},
+		{"", 0},
+		{"  ", 2},
+	}
+	for _, tt := range tests {
+		got := indentOf(tt.input)
+		if got != tt.want {
+			t.Errorf("indentOf(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestJobsMissingHardenRunner_CommentedLines(t *testing.T) {
+	// Comment lines must be skipped and not cause false positives.
+	content := `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@abc123
+      # - uses: some/other-action@old
+      - uses: actions/checkout@abc123
+`
+	missing := jobsMissingHardenRunner(content)
+	if len(missing) != 0 {
+		t.Errorf("expected no missing jobs, got %v", missing)
+	}
+}
+
+func TestJobsMissingHardenRunner_TopLevelKeyEndsJobs(t *testing.T) {
+	// A top-level key after jobs: should terminate job parsing.
+	content := `
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+permissions:
+  contents: read
+`
+	missing := jobsMissingHardenRunner(content)
+	if len(missing) != 1 || missing[0] != "build" {
+		t.Errorf("expected [build] missing, got %v", missing)
+	}
+}
+
 func TestIsHardenRunner(t *testing.T) {
 	tests := []struct {
 		value string

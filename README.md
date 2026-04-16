@@ -1,5 +1,8 @@
 # git-cascade
 
+[![CI](https://github.com/eukarya-inc/git-cascade/actions/workflows/ci.yml/badge.svg)](https://github.com/eukarya-inc/git-cascade/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/eukarya-inc/git-cascade/branch/main/graph/badge.svg)](https://codecov.io/gh/eukarya-inc/git-cascade)
+
 A CLI tool that scans all repositories in a GitHub organization for compliance against a set of rules defined in YAML configuration files.
 
 ## Installation

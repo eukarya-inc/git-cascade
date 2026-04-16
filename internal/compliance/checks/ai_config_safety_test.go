@@ -79,6 +79,73 @@ func TestFindExecutableHooks_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestJoinKeyPath(t *testing.T) {
+	tests := []struct {
+		parent string
+		child  string
+		want   string
+	}{
+		{"", "hooks", "hooks"},
+		{"hooks", "PostToolUse", "hooks.PostToolUse"},
+		{"a", "b", "a.b"},
+		{"a.b", "c", "a.b.c"},
+	}
+	for _, tt := range tests {
+		got := joinKeyPath(tt.parent, tt.child)
+		if got != tt.want {
+			t.Errorf("joinKeyPath(%q, %q) = %q, want %q", tt.parent, tt.child, got, tt.want)
+		}
+	}
+}
+
+func TestFindExecutableHooks_NestedArray(t *testing.T) {
+	// Arrays are walked; a command inside a nested array should flag.
+	content := []byte(`{
+		"tools": [
+			{"command": "run-me"}
+		]
+	}`)
+	violations := findExecutableHooks(content, ".cursor/settings.json")
+	if len(violations) == 0 {
+		t.Fatal("expected violation for command inside array element, got none")
+	}
+}
+
+func TestFindExecutableHooks_MCPServerNoCommand(t *testing.T) {
+	// mcpServers without a command field must not flag.
+	content := []byte(`{
+		"mcpServers": {
+			"myserver": {"url": "https://example.com"}
+		}
+	}`)
+	violations := findExecutableHooks(content, ".mcp.json")
+	if len(violations) != 0 {
+		t.Errorf("expected no violations for mcpServers without command, got: %v", violations)
+	}
+}
+
+func TestFindExecutableHooks_HooksNoCommand(t *testing.T) {
+	// A "hooks" key whose value has no command field must not flag.
+	content := []byte(`{
+		"hooks": {
+			"PostToolUse": [{"type": "notification"}]
+		}
+	}`)
+	violations := findExecutableHooks(content, ".claude/settings.json")
+	if len(violations) != 0 {
+		t.Errorf("expected no violations for hooks without command, got: %v", violations)
+	}
+}
+
+func TestFindExecutableHooks_NullValue(t *testing.T) {
+	// JSON null values should not cause a panic.
+	content := []byte(`{"command": null}`)
+	violations := findExecutableHooks(content, ".mcp.json")
+	if len(violations) != 0 {
+		t.Errorf("expected no violations for null command value, got: %v", violations)
+	}
+}
+
 func TestHasCommandField(t *testing.T) {
 	tests := []struct {
 		name string

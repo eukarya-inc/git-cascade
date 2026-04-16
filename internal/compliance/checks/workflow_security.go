@@ -306,6 +306,7 @@ func jobsMissingHardenRunner(content string) []string {
 		// A new top-level key ends the jobs block.
 		if indent == 0 && strings.HasSuffix(trimmed, ":") && trimmed != "jobs:" {
 			finishJob()
+			currentJob = ""
 			break
 		}
 
