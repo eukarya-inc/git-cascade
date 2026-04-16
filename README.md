@@ -259,7 +259,7 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning | — |
-| `npm-ci-required` | CI workflows must use `npm ci` instead of `npm install` | — |
+| `npm-ci-required` | CI workflows must use locked install commands (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) instead of bare install commands | — |
 | `renovate-config` | Renovate config must extend shared preset with a cooldown | `extends`, `min_stability_days` |
 | `external-collaborators` | No external collaborators may have admin privileges | — |
 | `no-env-files` | `.env`, `.env.local`, `.env.production` and other `.env.*` variants must not be committed (`.env.example` is allowed) | — |
