@@ -220,6 +220,72 @@ rules:
 	}
 }
 
+func TestParsePartial_InvalidYAML(t *testing.T) {
+	_, err := ParsePartial([]byte(":\tinvalid: yaml: ["))
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}
+
+func TestScopeMerge_IncludeArchivedAndForked(t *testing.T) {
+	// Verify that IncludeArchived and IncludeForked are overridden by other.
+	base := Scope{
+		IncludeArchived: boolPtr(false),
+		IncludeForked:   boolPtr(false),
+	}
+	other := Scope{
+		IncludeArchived: boolPtr(true),
+		IncludeForked:   boolPtr(true),
+	}
+	merged := base.Merge(other)
+	if merged.IncludeArchived == nil || *merged.IncludeArchived != true {
+		t.Error("expected IncludeArchived=true after merge")
+	}
+	if merged.IncludeForked == nil || *merged.IncludeForked != true {
+		t.Error("expected IncludeForked=true after merge")
+	}
+}
+
+func TestScopeMerge_NilOtherFields_KeepsBase(t *testing.T) {
+	// When other has nil bool pointers they must not overwrite base values.
+	base := Scope{
+		IncludeArchived: boolPtr(true),
+		IncludeForked:   boolPtr(true),
+	}
+	other := Scope{} // all nil
+	merged := base.Merge(other)
+	if merged.IncludeArchived == nil || *merged.IncludeArchived != true {
+		t.Error("expected base IncludeArchived=true to be preserved")
+	}
+	if merged.IncludeForked == nil || *merged.IncludeForked != true {
+		t.Error("expected base IncludeForked=true to be preserved")
+	}
+}
+
+func TestParseRule_EmptyParamsBlock(t *testing.T) {
+	// An explicit empty params block must not panic and must produce empty maps.
+	yaml := `
+version: "1"
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    severity: error
+    enabled: true
+    params: {}
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	if len(rule.Params) != 0 {
+		t.Errorf("expected empty Params, got %v", rule.Params)
+	}
+	if len(rule.ListParams) != 0 {
+		t.Errorf("expected empty ListParams, got %v", rule.ListParams)
+	}
+}
+
 func TestBoolDefault(t *testing.T) {
 	if BoolDefault(nil, true) != true {
 		t.Error("expected true for nil with default true")

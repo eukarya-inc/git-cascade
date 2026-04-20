@@ -2,6 +2,7 @@ package checks
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
@@ -485,6 +486,72 @@ jobs:
 	}
 }
 
+func TestActionsPinnedChecker_LocalActionSkipped(t *testing.T) {
+	// Local actions (starting with "./") must not be flagged as unpinned.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+jobs:
+  build:
+    steps:
+      - uses: ./.github/actions/setup
+`))
+	_, client := fake.serve(t)
+
+	c := &actionsPinnedChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass for local action, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestActionsPinnedChecker_DockerActionSkipped(t *testing.T) {
+	// docker:// references must not be flagged.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+jobs:
+  build:
+    steps:
+      - uses: docker://alpine:3.18
+`))
+	_, client := fake.serve(t)
+
+	c := &actionsPinnedChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass for docker:// action, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestActionsPinnedChecker_YamlExtension(t *testing.T) {
+	// Files with .yaml extension (not just .yml) must also be checked.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yaml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yaml", []byte(`
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+`))
+	_, client := fake.serve(t)
+
+	c := &actionsPinnedChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail for .yaml workflow with unpinned action, got %s", result.Status)
+	}
+}
+
 // ——— dockerfileDigestChecker ——————————————————————————————————————————————————
 
 func TestDockerfileDigestChecker_EmptyRepo(t *testing.T) {
@@ -652,5 +719,132 @@ func TestAIConfigSafetyChecker_SafeClaudeDir(t *testing.T) {
 	}
 	if result.Status != compliance.StatusPass {
 		t.Errorf("expected pass for safe .claude/ config, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestAIConfigSafetyChecker_ViolationInCursorDir(t *testing.T) {
+	// .cursor/ directory with an executable hook must be flagged.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".cursor", []string{"settings.json"})
+	fake.setFile("org", "repo", ".cursor/settings.json", []byte(`{
+		"hooks": {"PostToolUse": [{"command": "echo hi"}]}
+	}`))
+	_, client := fake.serve(t)
+
+	c := &aiConfigSafetyChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("ai-config-safety"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail for executable hook in .cursor/, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestAIConfigSafetyChecker_NonJsonFileInDirIgnored(t *testing.T) {
+	// Non-.json files inside .claude/ must be skipped without error.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".claude", []string{"README.md", "settings.json"})
+	fake.setFile("org", "repo", ".claude/settings.json", []byte(`{"theme": "dark"}`))
+	// README.md is not registered — the fake returns 404 for it; checker must skip non-json files.
+	_, client := fake.serve(t)
+
+	c := &aiConfigSafetyChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("ai-config-safety"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when only non-json file is unsafe content, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// ——— workflow_security checkers (additional coverage) ————————————————————————
+
+func TestPRTargetChecker_YamlExtension(t *testing.T) {
+	// Checker must also process .yaml files (not just .yml).
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yaml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yaml", []byte(`
+on:
+  pull_request_target:
+    types: [opened]
+`))
+	_, client := fake.serve(t)
+
+	c := &pullRequestTargetChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("no-pull-request-target"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail for .yaml workflow with pull_request_target, got %s", result.Status)
+	}
+}
+
+func TestPRTargetChecker_MultipleFiles_OneViolation(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml", "release.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`on: [push]`))
+	fake.setFile("org", "repo", ".github/workflows/release.yml", []byte(`
+on:
+  pull_request_target:
+`))
+	_, client := fake.serve(t)
+
+	c := &pullRequestTargetChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("no-pull-request-target"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail, got %s", result.Status)
+	}
+	if !strings.Contains(result.Message, "release.yml") {
+		t.Errorf("expected violation file in message, got %q", result.Message)
+	}
+}
+
+func TestSecretsInheritChecker_YamlExtension(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yaml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yaml", []byte(`
+jobs:
+  call:
+    uses: org/repo/.github/workflows/reusable.yml@main
+    secrets: inherit
+`))
+	_, client := fake.serve(t)
+
+	c := &secretsInheritChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("no-secrets-inherit"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail for .yaml workflow with secrets: inherit, got %s", result.Status)
+	}
+}
+
+func TestHardenRunnerChecker_YamlExtension(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yaml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yaml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@abc123
+`))
+	_, client := fake.serve(t)
+
+	c := &hardenRunnerChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("harden-runner-required"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail for .yaml workflow missing harden-runner, got %s", result.Status)
 	}
 }

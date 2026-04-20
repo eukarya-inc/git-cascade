@@ -186,18 +186,23 @@ func (b *branchProtectionServer) serve(t *testing.T) (*httptest.Server, *github.
 			parts := strings.Split(path, "/rules/branches/")
 			branch := parts[len(parts)-1]
 			if b.branchRules[branch] {
-				resp := map[string]any{
-					"pull_request": []map[string]any{
-						{"parameters": map[string]any{"required_approving_review_count": 1}},
+				// BranchRules.UnmarshalJSON expects a JSON *array* of rule objects,
+				// each with a "type" field (e.g. "pull_request").
+				resp := []map[string]any{
+					{
+						"type": "pull_request",
+						"parameters": map[string]any{
+							"required_approving_review_count": 1,
+						},
 					},
 				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(resp)
 				return
 			}
-			// Return empty ruleset (no active rules).
+			// Return empty ruleset (no active rules) — empty array.
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{}`))
+			w.Write([]byte(`[]`))
 
 		case strings.Contains(path, "/branches/") && strings.Contains(path, "/protection"):
 			// Extract branch from: /api/v3/repos/{owner}/{repo}/branches/{branch}/protection
@@ -402,5 +407,93 @@ func TestCheck_AdditionalBranchSameAsDefault_DeduplicatedAndPasses(t *testing.T)
 	}
 	if result.Status != compliance.StatusPass {
 		t.Errorf("expected pass, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// — checkBranchProtection helper branches ————————————————————————————————————
+
+func TestCheck_RulesetActive_ReviewParamFail(t *testing.T) {
+	// When ruleset is active but reviewer count is below the required minimum,
+	// checkBranchProtection should return a prefixed failure message.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		branchRules: map[string]bool{"main": true}, // active ruleset with 1 reviewer
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		Params:   map[string]string{"require_reviews": "true", "required_reviewers": "3"},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail when ruleset has fewer reviewers than required, got %s: %s", result.Status, result.Message)
+	}
+	if !strings.Contains(result.Message, "[main]") {
+		t.Errorf("expected branch name in failure message, got %q", result.Message)
+	}
+}
+
+func TestCheck_LegacyProtection_RequireReviews_NoReviews(t *testing.T) {
+	// Legacy protection exists but PR reviews are not configured and require_reviews=true.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		protectedBranches: map[string]bool{"main": true},
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		// The fake server returns protection without RequiredPullRequestReviews.
+		// However our fake always includes it — so test the reviewer count path instead:
+		// request 5 reviewers; fake only provides 1.
+		Params: map[string]string{"require_reviews": "true", "required_reviewers": "5"},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail when legacy protection has fewer reviewers than required, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestCheck_403OnBothAPIs_Skips(t *testing.T) {
+	// When both ruleset and legacy protection APIs return 403 the branch is treated
+	// as skipped (no failure added). The overall result should be pass since no
+	// failure messages accumulate.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := github.NewClient(nil).WithAuthToken("fake-token")
+	client, _ = client.WithEnterpriseURLs(srv.URL+"/", srv.URL+"/")
+
+	checker := &branchProtectionChecker{}
+	repo := repoWithDefault("main")
+	rule := baseRule("branch-protection")
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 403 on protection API → empty failure message → overall pass
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when API returns 403 (no failures accumulated), got %s: %s", result.Status, result.Message)
 	}
 }
