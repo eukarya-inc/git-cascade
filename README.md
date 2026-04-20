@@ -355,7 +355,28 @@ gh api --method POST /repos/myorg/compliance/code-scanning/sarifs \
 
 ### Slack
 
-After a scan, git-cascade posts a summary with pass/warn/error counts and a breakdown of failures per repository.
+After a scan, git-cascade posts a summary to Slack with pass/warn/error counts and a breakdown of failures per repository.
+
+#### Notification format
+
+Each notification includes a header with the org name and overall status, followed by a summary line:
+
+```
+✅ git-cascade compliance scan — myorg
+30 checks: 24 passed, 4 warnings, 2 errors
+```
+
+When results are routed to a channel via `repository_channels`, the repositories mapped to that channel are listed below the summary:
+
+```
+✅ git-cascade compliance scan — myorg
+30 checks: 24 passed, 4 warnings, 2 errors
+repositories:
+- myorg/api
+- myorg/backend
+```
+
+Channels that receive unrouted results (via the fallback `channel` param, the webhook path, or a bot token with no `repository_channels`) get the summary line only — no repository list.
 
 Two delivery methods are supported; choose one:
 
