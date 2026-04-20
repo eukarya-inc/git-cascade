@@ -113,6 +113,113 @@ func TestScopeMergeIncludeRepos(t *testing.T) {
 	}
 }
 
+// — Rule.UnmarshalYAML (params with list values) ——————————————————————————————
+
+func TestParseRule_ScalarParams(t *testing.T) {
+	yaml := `
+version: "1"
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      required_reviewers: "2"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	if rule.Params["require_reviews"] != "true" {
+		t.Errorf("expected require_reviews=true, got %q", rule.Params["require_reviews"])
+	}
+	if rule.Params["required_reviewers"] != "2" {
+		t.Errorf("expected required_reviewers=2, got %q", rule.Params["required_reviewers"])
+	}
+	if len(rule.ListParams) != 0 {
+		t.Errorf("expected no ListParams, got %v", rule.ListParams)
+	}
+}
+
+func TestParseRule_ListParams(t *testing.T) {
+	yaml := `
+version: "1"
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    severity: error
+    enabled: true
+    params:
+      additional_branches:
+        - develop
+        - staging
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	branches := rule.ListParams["additional_branches"]
+	if len(branches) != 2 || branches[0] != "develop" || branches[1] != "staging" {
+		t.Errorf("unexpected additional_branches: %v", branches)
+	}
+	if len(rule.Params) != 0 {
+		t.Errorf("expected no scalar Params, got %v", rule.Params)
+	}
+}
+
+func TestParseRule_MixedParams(t *testing.T) {
+	yaml := `
+version: "1"
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      required_reviewers: "1"
+      additional_branches:
+        - develop
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	if rule.Params["require_reviews"] != "true" {
+		t.Errorf("expected require_reviews=true, got %q", rule.Params["require_reviews"])
+	}
+	branches := rule.ListParams["additional_branches"]
+	if len(branches) != 1 || branches[0] != "develop" {
+		t.Errorf("unexpected additional_branches: %v", branches)
+	}
+}
+
+func TestParseRule_NoParams(t *testing.T) {
+	yaml := `
+version: "1"
+rules:
+  - id: actions-pinned
+    name: Actions Pinned
+    severity: error
+    enabled: true
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	if len(rule.Params) != 0 {
+		t.Errorf("expected no Params, got %v", rule.Params)
+	}
+	if len(rule.ListParams) != 0 {
+		t.Errorf("expected no ListParams, got %v", rule.ListParams)
+	}
+}
+
 func TestBoolDefault(t *testing.T) {
 	if BoolDefault(nil, true) != true {
 		t.Error("expected true for nil with default true")

@@ -5,6 +5,8 @@ rules:
     severity: error
     enabled: true
     params:
+      additional_branches:
+        - "development"
       require_reviews: "true"
       required_reviewers: "1"
 

@@ -71,12 +71,69 @@ type Scope struct {
 
 // Rule defines a single compliance check.
 type Rule struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description"`
-	Severity    Severity          `yaml:"severity"`
-	Enabled     bool              `yaml:"enabled"`
-	Params      map[string]string `yaml:"params,omitempty"`
+	ID          string              `yaml:"id"`
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description"`
+	Severity    Severity            `yaml:"severity"`
+	Enabled     bool                `yaml:"enabled"`
+	Params      map[string]string   `yaml:"params,omitempty"`
+	ListParams  map[string][]string `yaml:"-"`
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler so that the params block can hold
+// both scalar string values (key: "value") and sequence values (key: ["a","b"]).
+// Scalar values are stored in Params; sequence values are stored in ListParams.
+func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
+	// Use an alias type to avoid infinite recursion when calling Decode.
+	type ruleAlias struct {
+		ID          string   `yaml:"id"`
+		Name        string   `yaml:"name"`
+		Description string   `yaml:"description"`
+		Severity    Severity `yaml:"severity"`
+		Enabled     bool     `yaml:"enabled"`
+	}
+	var alias ruleAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	r.ID = alias.ID
+	r.Name = alias.Name
+	r.Description = alias.Description
+	r.Severity = alias.Severity
+	r.Enabled = alias.Enabled
+
+	// Find the params mapping node.
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		keyNode := value.Content[i]
+		valNode := value.Content[i+1]
+		if keyNode.Value != "params" {
+			continue
+		}
+		if valNode.Kind != yaml.MappingNode {
+			break
+		}
+		for j := 0; j+1 < len(valNode.Content); j += 2 {
+			k := valNode.Content[j].Value
+			v := valNode.Content[j+1]
+			switch v.Kind {
+			case yaml.SequenceNode:
+				if r.ListParams == nil {
+					r.ListParams = make(map[string][]string)
+				}
+				var items []string
+				for _, item := range v.Content {
+					items = append(items, item.Value)
+				}
+				r.ListParams[k] = items
+			default:
+				if r.Params == nil {
+					r.Params = make(map[string]string)
+				}
+				r.Params[k] = v.Value
+			}
+		}
+	}
+	return nil
 }
 
 // Severity represents how critical a compliance violation is.
