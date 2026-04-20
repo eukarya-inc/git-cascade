@@ -37,8 +37,8 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_APP_ID` | `--app-id` | GitHub App ID |
 | `GIT_CASCADE_INSTALLATION_ID` | `--installation-id` | GitHub App Installation ID |
 | `GIT_CASCADE_PRIVATE_KEY_PATH` | `--private-key-path` | Path to the GitHub App private key PEM file |
-| `GIT_CASCADE_SLACK_WEBHOOK` | `--slack-webhook` | Slack Incoming Webhook URL |
-| `GIT_CASCADE_SLACK_CHANNEL` | `--slack-channel` | Override Slack channel |
+| `GIT_CASCADE_SLACK_WEBHOOK` | — | Slack Incoming Webhook URL |
+| `GIT_CASCADE_SLACK_BOT_TOKEN` | — | Slack bot user OAuth token (`xoxb-...`) |
 | `GIT_CASCADE_SLACK_RESULTS_URL` | `--slack-results-url` | URL linked in the Slack notification (e.g. CI run URL) |
 | `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance` or `repo` |
 | `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated issue (mode=compliance) |
@@ -112,7 +112,7 @@ The GitHub App must be installed on the organization with access to the reposito
 
 ### Slack Notification
 
-For `--slack-webhook`, no additional GitHub permissions are required. You only need a [Slack Incoming Webhook URL](https://api.slack.com/messaging/webhooks). Set `GIT_CASCADE_SLACK_WEBHOOK` to avoid putting the URL in config files.
+No additional GitHub permissions are required for Slack notifications. See [Slack](#slack) for the two delivery methods and their setup.
 
 ### Permission per Check
 
@@ -162,9 +162,8 @@ git-cascade scan --org myorg --exclude-repo sandbox --exclude-repo archive
 # Use local config instead of remote compliance repo
 git-cascade scan --org myorg --local-config ./compliance/
 
-# Notify Slack after scanning
-git-cascade scan --org myorg --slack-webhook https://hooks.slack.com/services/xxx \
-  --slack-results-url https://github.com/myorg/compliance/actions/runs/123
+# Notify Slack after scanning (webhook)
+git-cascade scan --org myorg --slack-results-url https://github.com/myorg/compliance/actions/runs/123
 
 # Post a consolidated GitHub Issue with all findings
 git-cascade scan --org myorg --issue-mode compliance
@@ -225,12 +224,22 @@ output:
 
 notify:
   slack:
-    enabled: false
-    # webhook_url is better set via GIT_CASCADE_SLACK_WEBHOOK env var
-    webhook_url: ""
-    channel: ""         # Overrides the webhook's default channel
-    # results_url is a runtime value — pass it via --slack-results-url flag
-    # or GIT_CASCADE_SLACK_RESULTS_URL env var, not in the config file
+    enabled: true
+    # --- Delivery method (choose one) ---
+    # Webhook — posts to a single fixed channel. Simplest option.
+    webhook_url: ""     # prefer GIT_CASCADE_SLACK_WEBHOOK env var
+    # Bot token — required for per-channel routing via repository_channels.
+    bot_token: ""       # prefer GIT_CASCADE_SLACK_BOT_TOKEN env var
+    # Default channel (webhook override, or bot fallback for unmapped repos)
+    channel: "#compliance"
+    # Per-repo routing (requires bot_token)
+    repository_channels:
+      - channels: "#ops, #security"   # one or more channels, comma-separated
+        repositories: "api, backend"  # one or more repo names, comma-separated
+      - channels: "#frontend"
+        repositories: "web, dashboard"
+    # results_url is a runtime value — pass via --slack-results-url flag
+    # or GIT_CASCADE_SLACK_RESULTS_URL env var, not stored in config
   issues:
     enabled: false
     mode: compliance    # compliance = one consolidated issue | repo = one issue per failing repo
@@ -248,6 +257,9 @@ rules:
     params:               # Rule-specific parameters (optional)
       require_reviews: "true"
       required_reviewers: "1"
+      additional_branches:  # Also check these branches in addition to the default branch
+        - develop
+        - staging
 ```
 
 CLI flags always override the corresponding YAML config key when explicitly provided.
@@ -259,7 +271,7 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `readme-exists` | Repository must contain a README file | — |
 | `license-exists` | Repository must contain a LICENSE file | — |
 | `codeowners-exists` | CODEOWNERS must exist in `.github/`, root, or `docs/` | — |
-| `branch-protection` | Default branch must have protection rules enabled; skipped for private repos on free GitHub plans | `require_reviews`, `required_reviewers` |
+| `branch-protection` | Default branch must have protection rules enabled; skipped for private repos on free GitHub plans | `require_reviews`, `required_reviewers`, `additional_branches` |
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning | — |
@@ -271,6 +283,35 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `no-pull-request-target` | Workflows must not use `pull_request_target`, which runs in the base branch context and exposes secrets to untrusted fork code | — |
 | `no-secrets-inherit` | Reusable workflow calls must not use `secrets: inherit`, which exposes all caller secrets violating least-privilege | — |
 | `harden-runner-required` | Every job in public repository workflows must use `step-security/harden-runner` as the first step; skipped for private repositories | — |
+
+#### Rule Params Reference
+
+**`branch-protection`**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `require_reviews` | `"true"` / `"false"` | Require pull request reviews before merging |
+| `required_reviewers` | integer string, e.g. `"2"` | Minimum number of required approving reviewers (requires `require_reviews: "true"`) |
+| `additional_branches` | YAML list of strings | Extra branches to check in addition to the default branch |
+
+```yaml
+- id: branch-protection
+  severity: error
+  enabled: true
+  params:
+    require_reviews: "true"
+    required_reviewers: "2"
+    additional_branches:
+      - develop
+      - staging
+```
+
+**`renovate-config`**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `extends` | string | Required preset name (default: `github>reearth/renovate-config`) |
+| `min_stability_days` | integer string | Minimum `stabilityDays` value required in the Renovate config |
 
 ## Output Formats
 
@@ -316,16 +357,70 @@ gh api --method POST /repos/myorg/compliance/code-scanning/sarifs \
 
 After a scan, git-cascade posts a summary with pass/warn/error counts and a breakdown of failures per repository.
 
-```bash
-# Via flag
-git-cascade scan --org myorg --slack-webhook https://hooks.slack.com/services/xxx
+Two delivery methods are supported; choose one:
 
-# Via env var (recommended)
+#### Webhook (simple, single channel)
+
+The simplest option. One webhook URL posts a single summary to a fixed channel. The channel is configured on the webhook itself — use `channel` in config only to override it.
+
+```bash
+# Via env var (recommended — avoids storing the URL in config)
 export GIT_CASCADE_SLACK_WEBHOOK=https://hooks.slack.com/services/xxx
 git-cascade scan --org myorg
 ```
 
-Use `--slack-results-url` to include a link to the full results (e.g. a CI run or uploaded SARIF artifact).
+```yaml
+notify:
+  slack:
+    enabled: true
+    webhook_url: https://hooks.slack.com/services/xxx
+    channel: "#compliance"   # optional override of the webhook's default channel
+```
+
+#### Bot Token (flexible, per-channel routing)
+
+A Slack bot user OAuth token (`xoxb-...`) uses the Slack Web API (`chat.postMessage`) and supports routing results for specific repositories to different channels.
+
+```bash
+export GIT_CASCADE_SLACK_BOT_TOKEN=xoxb-xxx
+git-cascade scan --org myorg
+```
+
+```yaml
+notify:
+  slack:
+    enabled: true
+    bot_token: xoxb-xxx          # prefer GIT_CASCADE_SLACK_BOT_TOKEN env var
+    channel: "#compliance"       # fallback channel for repositories not in any mapping
+    repository_channels:
+      - channels: "#ops, #security"
+        repositories: "api, backend"
+      - channels: "#frontend"
+        repositories: "web, dashboard"
+```
+
+**How routing works:**
+
+- Results are grouped by repository. Each repository's results are sent to every channel it is mapped to (many-to-many).
+- Repository names are matched against the full `owner/repo` value or just the short repo name — both work.
+- Repositories not matched by any mapping fall back to `channel` (if set); if no default channel is set, their results are silently dropped.
+- When `repository_channels` is not configured, a single summary of all results is sent to `channel`.
+
+**Creating a Slack bot token:**
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app.
+2. Under **OAuth & Permissions**, add the `chat:write` scope.
+3. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`).
+4. Invite the bot to each channel it needs to post in (`/invite @your-bot`).
+
+#### Results URL
+
+Use `--slack-results-url` (or `GIT_CASCADE_SLACK_RESULTS_URL`) to include a link to the full report in the notification (e.g. a GitHub Actions run URL or an uploaded SARIF artifact).
+
+```bash
+git-cascade scan --org myorg \
+  --slack-results-url https://github.com/myorg/compliance/actions/runs/123
+```
 
 ### GitHub Issues
 
