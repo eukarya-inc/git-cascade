@@ -18,8 +18,23 @@ output:
 notify:
   slack:
     enabled: false
+    # --- Delivery method (choose one) ---
+    # Webhook (simplest): one URL posts to a single fixed channel.
     # webhook_url: https://hooks.slack.com/services/xxx  # prefer GIT_CASCADE_SLACK_WEBHOOK env var
-    # channel: "#compliance"
+    #
+    # Bot token (flexible): supports per-channel routing via repository_channels.
+    # bot_token: xoxb-...  # prefer GIT_CASCADE_SLACK_BOT_TOKEN env var
+    #
+    # --- Default channel ---
+    # channel: "#compliance"  # fallback for repos not listed in repository_channels
+    #
+    # --- Per-repo channel routing (requires bot_token) ---
+    # repository_channels:
+    #   - channels: "#ops, #security"
+    #     repositories: "api, backend"
+    #   - channels: "#frontend"
+    #     repositories: "web, dashboard"
+    #
     # results_url is a runtime value — use --slack-results-url flag or GIT_CASCADE_SLACK_RESULTS_URL env var
   issues:
     enabled: false

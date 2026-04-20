@@ -36,11 +36,32 @@ type SlackConfig struct {
 	// Enabled controls whether Slack notifications are sent.
 	Enabled bool `yaml:"enabled,omitempty"`
 	// WebhookURL is the Incoming Webhook URL. Prefer the GIT_CASCADE_SLACK_WEBHOOK env var.
+	// Use this for simple single-channel delivery.
 	WebhookURL string `yaml:"webhook_url,omitempty"`
-	// Channel overrides the default channel configured on the webhook (optional).
+	// BotToken is a Slack bot user OAuth token (xoxb-...).
+	// Prefer the GIT_CASCADE_SLACK_BOT_TOKEN env var.
+	// Required when using RepositoryChannels for per-channel routing.
+	BotToken string `yaml:"bot_token,omitempty"`
+	// Channel is the default fallback channel (name or ID).
+	// Used as the webhook channel override, or as the bot fallback for unmapped repos.
 	Channel string `yaml:"channel,omitempty"`
+	// RepositoryChannels maps specific repositories to one or more channels.
+	// Results for a repository are sent to every channel it is mapped to.
+	// Repositories not listed here fall back to the default Channel (if set).
 	// ResultsURL is not stored in config — it is always a runtime value supplied
 	// via --slack-results-url flag or GIT_CASCADE_SLACK_RESULTS_URL env var.
+	RepositoryChannels []RepositoryChannelMapping `yaml:"repository_channels,omitempty"`
+}
+
+// RepositoryChannelMapping routes results for a set of repositories to one or
+// more Slack channels.  Both Channels and Repositories are comma-separated
+// strings so they are easy to write inline in YAML.
+type RepositoryChannelMapping struct {
+	// Channels is a comma-separated list of Slack channel names (e.g. "#ops, #security").
+	Channels string `yaml:"channels"`
+	// Repositories is a comma-separated list of repository names as they appear
+	// in scan results (short name or owner/repo, must match consistently).
+	Repositories string `yaml:"repositories"`
 }
 
 // IssuesConfig configures GitHub Issues posting.
