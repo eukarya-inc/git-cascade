@@ -293,12 +293,12 @@ func TestPostSlack_SingleRepo(t *testing.T) {
 
 	found := false
 	for _, b := range received.Blocks {
-		if b.Text != nil && strings.Contains(b.Text.Text, "repository") {
+		if b.Text != nil && strings.Contains(b.Text.Text, "checks") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected singular 'repository' wording for single repo scan")
+		t.Error("expected check count summary in slack notification")
 	}
 }
 
@@ -338,7 +338,7 @@ func TestPostSlack_BotToken_DefaultChannel(t *testing.T) {
 	// We do this by setting the bot token and a webhook URL that is unused,
 	// but we need to swap the constant — instead test via env-resolved token
 	// by calling postSlackSummary directly with our server URL.
-	if err := postSlackSummary(srv.URL, "xoxb-fake", "#general", "myorg", nil, "", config.Scope{}); err != nil {
+	if err := postSlackSummary(srv.URL, "xoxb-fake", "#general", "myorg", nil, "", config.Scope{}, false); err != nil {
 		t.Fatalf("postSlackSummary: %v", err)
 	}
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -357,7 +357,7 @@ func TestPostSlack_BotToken_APIError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := postSlackSummary(srv.URL, "xoxb-fake", "#missing", "myorg", nil, "", config.Scope{})
+	err := postSlackSummary(srv.URL, "xoxb-fake", "#missing", "myorg", nil, "", config.Scope{}, false)
 	if err == nil || !strings.Contains(err.Error(), "channel_not_found") {
 		t.Errorf("expected channel_not_found error, got %v", err)
 	}
@@ -380,7 +380,7 @@ func TestPostSlack_BotTokenFromEnv(t *testing.T) {
 	if token == "" {
 		token = "xoxb-from-env"
 	}
-	if err := postSlackSummary(srv.URL, token, cfg.Channel, "myorg", nil, "", config.Scope{}); err != nil {
+	if err := postSlackSummary(srv.URL, token, cfg.Channel, "myorg", nil, "", config.Scope{}, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

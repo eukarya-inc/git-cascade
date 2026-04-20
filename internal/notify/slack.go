@@ -75,7 +75,7 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 		return postSlackViaBot(cfg, org, results, resultsURL, scope)
 	}
 	// Webhook path: single summary, no per-repo routing.
-	return postSlackSummary(webhookURL, "", cfg.Channel, org, results, resultsURL, scope)
+	return postSlackSummary(webhookURL, "", cfg.Channel, org, results, resultsURL, scope, false)
 }
 
 // postSlackViaBot fans results out to per-channel payloads using the Slack Web API.
@@ -96,7 +96,7 @@ func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, resul
 		if cfg.Channel == "" {
 			return fmt.Errorf("slack bot token configured but no channel set (set notify.slack.channel or add repository_channels)")
 		}
-		return postSlackSummary(apiURL, botToken, cfg.Channel, org, results, resultsURL, scope)
+		return postSlackSummary(apiURL, botToken, cfg.Channel, org, results, resultsURL, scope, false)
 	}
 
 	repoChannels := buildRepoChannelIndex(cfg.RepositoryChannels)
@@ -120,14 +120,14 @@ func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, resul
 	}
 
 	for ch, chResults := range channelResults {
-		if err := postSlackSummary(apiURL, botToken, ch, org, chResults, resultsURL, scope); err != nil {
+		if err := postSlackSummary(apiURL, botToken, ch, org, chResults, resultsURL, scope, true); err != nil {
 			return err
 		}
 	}
 
-	// Unmapped repos fall back to the default channel.
+	// Unmapped repos fall back to the default channel — summary only, no repo list.
 	if len(unmapped) > 0 && cfg.Channel != "" {
-		if err := postSlackSummary(apiURL, botToken, cfg.Channel, org, unmapped, resultsURL, scope); err != nil {
+		if err := postSlackSummary(apiURL, botToken, cfg.Channel, org, unmapped, resultsURL, scope, false); err != nil {
 			return err
 		}
 	}
@@ -151,7 +151,7 @@ func buildRepoChannelIndex(mappings []config.RepositoryChannelMapping) map[strin
 // postSlackSummary sends a single summary payload.
 // When token is non-empty the request is sent as a bot via the Web API (Bearer
 // auth); otherwise it is sent as an Incoming Webhook POST with no auth header.
-func postSlackSummary(url, token, channel, org string, results []compliance.Result, resultsURL string, scope config.Scope) error {
+func postSlackSummary(url, token, channel, org string, results []compliance.Result, resultsURL string, scope config.Scope, listRepos bool) error {
 	passes, warnings, errors := countResults(results)
 	total := len(results)
 
@@ -162,11 +162,24 @@ func postSlackSummary(url, token, channel, org string, results []compliance.Resu
 		statusIcon = ":warning:"
 	}
 
-	totalRepos := countRepos(results)
 	headerText := fmt.Sprintf("%s *git-cascade compliance scan — %s*", statusIcon, org)
-	summaryText := fmt.Sprintf("Scanned *%d* repositor%s / *%d* checks: *%d* passed, *%d* warnings, *%d* errors",
+	totalRepos := len(uniqueRepos(results))
+	summaryText := fmt.Sprintf("Scanned *%d* repositor%s — *%d* checks: *%d* passed, *%d* warnings, *%d* errors",
 		totalRepos, map[bool]string{true: "y", false: "ies"}[totalRepos == 1],
 		total, passes, warnings, errors)
+
+	if listRepos {
+		repos := uniqueRepos(results)
+		if len(repos) > 0 {
+			var repoList strings.Builder
+			repoList.WriteString("\nrepositories:")
+			for _, repo := range repos {
+				repoList.WriteString("\n- ")
+				repoList.WriteString(repo)
+			}
+			summaryText += repoList.String()
+		}
+	}
 
 	if resultsURL != "" {
 		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)
@@ -257,6 +270,19 @@ func countResults(results []compliance.Result) (passes, warnings, errors int) {
 		}
 	}
 	return
+}
+
+// uniqueRepos returns a sorted, deduplicated list of repo names from results.
+func uniqueRepos(results []compliance.Result) []string {
+	seen := make(map[string]struct{})
+	var repos []string
+	for _, r := range results {
+		if _, ok := seen[r.Repo]; !ok {
+			seen[r.Repo] = struct{}{}
+			repos = append(repos, r.Repo)
+		}
+	}
+	return repos
 }
 
 func groupByRepo(results []compliance.Result) map[string][]compliance.Result {
