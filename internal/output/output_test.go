@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -152,5 +153,40 @@ func TestWrite_UnknownFormat(t *testing.T) {
 	err := Write(&buf, sampleResults, Options{Format: "xml"})
 	if err == nil {
 		t.Error("expected error for unknown format")
+	}
+}
+
+// --- OutputPath ---
+
+func TestWrite_OutputPath(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/results.json"
+	var buf bytes.Buffer
+	if err := Write(&buf, sampleResults, Options{Format: FormatJSON, OutputPath: path}); err != nil {
+		t.Fatalf("Write with OutputPath: %v", err)
+	}
+	// buf should be empty since output went to the file.
+	if buf.Len() != 0 {
+		t.Error("expected empty buffer when OutputPath is set")
+	}
+	// File must contain valid JSON.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+	var out []compliance.Result
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("invalid JSON in output file: %v", err)
+	}
+	if len(out) != len(sampleResults) {
+		t.Errorf("expected %d results, got %d", len(sampleResults), len(out))
+	}
+}
+
+func TestWrite_OutputPath_InvalidDir(t *testing.T) {
+	var buf bytes.Buffer
+	err := Write(&buf, sampleResults, Options{Format: FormatJSON, OutputPath: "/no/such/dir/results.json"})
+	if err == nil {
+		t.Error("expected error for invalid output path")
 	}
 }

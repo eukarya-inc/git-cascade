@@ -201,6 +201,58 @@ rules:
 	}
 }
 
+func TestLoad_ValidFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "config.yaml", `
+version: "1"
+rules:
+  - id: readme-exists
+    name: README
+    description: desc
+    severity: warning
+    enabled: true
+`)
+	cfg, err := Load(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Version != "1" {
+		t.Errorf("expected version=1, got %q", cfg.Version)
+	}
+}
+
+func TestLoad_MissingFile(t *testing.T) {
+	_, err := Load("/no/such/file.yaml")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestLoad_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bad.yaml", `version: "1"\ninvalid: [unclosed`)
+	_, err := Load(filepath.Join(dir, "bad.yaml"))
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}
+
+func TestLoad_FailsValidation(t *testing.T) {
+	dir := t.TempDir()
+	// Missing version field.
+	writeFile(t, dir, "noversion.yaml", `
+rules:
+  - id: readme-exists
+    name: README
+    severity: warning
+    enabled: true
+`)
+	_, err := Load(filepath.Join(dir, "noversion.yaml"))
+	if err == nil {
+		t.Error("expected validation error for missing version")
+	}
+}
+
 func TestLoadAll_DuplicateRuleIDs_Fails(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", `

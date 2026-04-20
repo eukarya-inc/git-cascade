@@ -54,3 +54,10 @@ func TestSHA256DigestPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerfileDigestChecker_ID(t *testing.T) {
+	c := &dockerfileDigestChecker{}
+	if c.ID() != "dockerfile-digest" {
+		t.Errorf("unexpected ID: %q", c.ID())
+	}
+}
