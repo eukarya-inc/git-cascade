@@ -64,10 +64,13 @@ func ListOrgRepos(ctx context.Context, client *github.Client, org string) ([]Rep
 func FetchFileContent(ctx context.Context, client *github.Client, owner, repo, path, ref string) ([]byte, error) {
 	opts := &github.RepositoryContentGetOptions{Ref: ref}
 
-	for {
+	for attempt := 0; ; attempt++ {
 		fileContent, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, path, opts)
 		if err != nil {
 			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if waitForTransient(ctx, err, attempt) {
 				continue
 			}
 			if resp != nil && resp.StatusCode == 404 {
@@ -106,10 +109,13 @@ func FetchFileContent(ctx context.Context, client *github.Client, owner, repo, p
 // Rate limit errors are retried after waiting for the reset window.
 func ListDirectoryContents(ctx context.Context, client *github.Client, owner, repo, path, ref string) ([]*github.RepositoryContent, error) {
 	opts := &github.RepositoryContentGetOptions{Ref: ref}
-	for {
+	for attempt := 0; ; attempt++ {
 		_, dirContent, resp, err := client.Repositories.GetContents(ctx, owner, repo, path, opts)
 		if err != nil {
 			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if waitForTransient(ctx, err, attempt) {
 				continue
 			}
 			if resp != nil && resp.StatusCode == 404 {
@@ -216,6 +222,33 @@ func waitForRateLimit(ctx context.Context, err error) bool {
 	case <-ctx.Done():
 		return false
 	case <-time.After(resetIn + time.Second):
+		return true
+	}
+}
+
+// isTransientError reports whether err is a transient network failure that is
+// safe to retry (unexpected EOF, connection reset, etc.).
+func isTransientError(err error) bool {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "unexpected EOF") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "EOF")
+}
+
+// waitForTransient blocks for a short backoff when err is a transient network
+// error. Returns true if the caller should retry, false otherwise.
+func waitForTransient(ctx context.Context, err error, attempt int) bool {
+	if !isTransientError(err) {
+		return false
+	}
+	backoff := min(time.Duration(1<<attempt)*time.Second, 8*time.Second) // 1s, 2s, 4s, 8s
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(backoff):
 		return true
 	}
 }
