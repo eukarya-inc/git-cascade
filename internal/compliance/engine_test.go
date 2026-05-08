@@ -156,6 +156,198 @@ func TestEngine_EmptyRepos(t *testing.T) {
 	}
 }
 
+func makeRuleWithScope(id string, enabled bool, scope *config.RuleScope) config.Rule {
+	r := makeRule(id, enabled)
+	r.Scope = scope
+	return r
+}
+
+func TestEngine_RuleScopeExcludeRepos(t *testing.T) {
+	stub := &stubChecker{id: "scoped-rule-exclude"}
+	Register(stub)
+	defer delete(registry, "scoped-rule-exclude")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules: []config.Rule{
+			makeRuleWithScope("scoped-rule-exclude", true, &config.RuleScope{
+				ExcludeRepos: []string{"testing", "sandbox-*"},
+			}),
+		},
+	}
+	repos := []gh.Repository{makeRepo("api"), makeRepo("testing"), makeRepo("sandbox-foo")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (only api), got %d", len(results))
+	}
+	if results[0].Repo != "org/api" {
+		t.Errorf("expected result for org/api, got %s", results[0].Repo)
+	}
+}
+
+func TestEngine_RuleScopeIncludeRepos(t *testing.T) {
+	stub := &stubChecker{id: "scoped-rule-include"}
+	Register(stub)
+	defer delete(registry, "scoped-rule-include")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules: []config.Rule{
+			makeRuleWithScope("scoped-rule-include", true, &config.RuleScope{
+				IncludeRepos: []string{"super-*", "critical"},
+			}),
+		},
+	}
+	repos := []gh.Repository{makeRepo("api"), makeRepo("super-important"), makeRepo("critical")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results (super-important, critical), got %d", len(results))
+	}
+}
+
+func TestEngine_RuleScopeIncludeOverridesExclude(t *testing.T) {
+	stub := &stubChecker{id: "scoped-rule-both"}
+	Register(stub)
+	defer delete(registry, "scoped-rule-both")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules: []config.Rule{
+			makeRuleWithScope("scoped-rule-both", true, &config.RuleScope{
+				IncludeRepos: []string{"api"},
+				ExcludeRepos: []string{"api"}, // include wins
+			}),
+		},
+	}
+	repos := []gh.Repository{makeRepo("api"), makeRepo("web")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 1 || results[0].Repo != "org/api" {
+		t.Errorf("expected 1 result for org/api (include wins), got %v", results)
+	}
+}
+
+func TestEngine_RuleScopeNilRunsOnAll(t *testing.T) {
+	stub := &stubChecker{id: "unscoped-rule"}
+	Register(stub)
+	defer delete(registry, "unscoped-rule")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules:   []config.Rule{makeRule("unscoped-rule", true)},
+	}
+	repos := []gh.Repository{makeRepo("a"), makeRepo("b"), makeRepo("c")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results (no scope = all repos), got %d", len(results))
+	}
+}
+
+func TestEngine_IncludeRulesGlob(t *testing.T) {
+	stub1 := &stubChecker{id: "security-secrets"}
+	stub2 := &stubChecker{id: "security-branch"}
+	stub3 := &stubChecker{id: "quality-lint"}
+	Register(stub1)
+	Register(stub2)
+	Register(stub3)
+	defer delete(registry, "security-secrets")
+	defer delete(registry, "security-branch")
+	defer delete(registry, "quality-lint")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules: []config.Rule{
+			makeRule("security-secrets", true),
+			makeRule("security-branch", true),
+			makeRule("quality-lint", true),
+		},
+		IncludeRules: []string{"security-*"},
+	}
+	repos := []gh.Repository{makeRepo("a")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results (security-* rules only), got %d", len(results))
+	}
+	if stub3.calls.Load() != 0 {
+		t.Error("quality-lint should not run when include_rules=security-*")
+	}
+}
+
+func TestEngine_ExcludeRulesGlob(t *testing.T) {
+	stub1 := &stubChecker{id: "sec-main"}
+	stub2 := &stubChecker{id: "sec-extra"}
+	stub3 := &stubChecker{id: "other-rule"}
+	Register(stub1)
+	Register(stub2)
+	Register(stub3)
+	defer delete(registry, "sec-main")
+	defer delete(registry, "sec-extra")
+	defer delete(registry, "other-rule")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules: []config.Rule{
+			makeRule("sec-main", true),
+			makeRule("sec-extra", true),
+			makeRule("other-rule", true),
+		},
+		ExcludeRules: []string{"sec-*"},
+	}
+	repos := []gh.Repository{makeRepo("a")}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (only other-rule), got %d", len(results))
+	}
+	if stub1.calls.Load() != 0 || stub2.calls.Load() != 0 {
+		t.Error("sec-* rules should not run when exclude_rules=sec-*")
+	}
+}
+
+func TestEngine_IncludeRulesTakesPrecedenceOverExclude(t *testing.T) {
+	stub := &stubChecker{id: "overlap-rule"}
+	Register(stub)
+	defer delete(registry, "overlap-rule")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules:   []config.Rule{makeRule("overlap-rule", true)},
+		// include wins: rule matches include so it should run despite also matching exclude
+		IncludeRules: []string{"overlap-*"},
+		ExcludeRules: []string{"overlap-*"},
+	}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), []gh.Repository{makeRepo("a")})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result (include_rules wins), got %d", len(results))
+	}
+}
+
 func TestEngine_WithConcurrency(t *testing.T) {
 	e := NewEngine(nil, &config.ComplianceConfig{Version: "1"}, noopLogger())
 	if e.concurrency != defaultConcurrency {

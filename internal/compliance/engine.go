@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"sync"
 
 	"github.com/eukarya-inc/git-cascade/internal/config"
@@ -68,6 +69,10 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 			e.logger.Debug("skipping disabled rule", "rule", rule.ID)
 			continue
 		}
+		if !ruleMatchesFilter(rule.ID, e.config.IncludeRules, e.config.ExcludeRules) {
+			e.logger.Debug("skipping rule excluded by filter", "rule", rule.ID)
+			continue
+		}
 		checker := GetChecker(rule.ID)
 		if checker == nil {
 			e.logger.Warn("no checker registered for rule", "rule", rule.ID)
@@ -82,6 +87,10 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 	var jobs []checkJob
 	for _, repo := range repos {
 		for _, ar := range activeRules {
+			if !repoMatchesRuleScope(repo.Name, ar.rule.Scope) {
+				e.logger.Debug("skipping rule for repo due to rule scope", "rule", ar.rule.ID, "repo", repo.FullName)
+				continue
+			}
 			jobs = append(jobs, checkJob{rule: ar.rule, repo: repo, checker: ar.checker})
 		}
 	}
@@ -136,4 +145,48 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 	}
 
 	return results, nil
+}
+
+// repoMatchesRuleScope returns true when the repo should be checked by a rule
+// that has a per-rule scope override. When scope is nil the repo always matches.
+// include_repos takes precedence: if set, the repo must match at least one
+// pattern. Otherwise it is included unless it matches an exclude_repos pattern.
+func repoMatchesRuleScope(repoName string, scope *config.RuleScope) bool {
+	if scope == nil {
+		return true
+	}
+	if len(scope.IncludeRepos) > 0 {
+		for _, p := range scope.IncludeRepos {
+			if ok, _ := path.Match(p, repoName); ok {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range scope.ExcludeRepos {
+		if ok, _ := path.Match(p, repoName); ok {
+			return false
+		}
+	}
+	return true
+}
+
+// ruleMatchesFilter returns true when ruleID should be included in the scan.
+// If includePatterns is non-empty, the rule must match at least one pattern.
+// Otherwise, the rule is included unless it matches an excludePatterns entry.
+func ruleMatchesFilter(ruleID string, includePatterns, excludePatterns []string) bool {
+	if len(includePatterns) > 0 {
+		for _, p := range includePatterns {
+			if ok, _ := path.Match(p, ruleID); ok {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range excludePatterns {
+		if ok, _ := path.Match(p, ruleID); ok {
+			return false
+		}
+	}
+	return true
 }

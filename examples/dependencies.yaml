@@ -4,12 +4,19 @@ rules:
     description: Projects with package manifests must have corresponding lockfiles committed
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - docs-*
+    #     - sandbox-*
 
   - id: npm-ci-required
     name: Locked Install in CI
     description: CI workflows must use locked install commands (npm ci, pnpm install --frozen-lockfile, yarn install --immutable) instead of bare install commands
     severity: warning
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
 
   - id: renovate-config
     name: Renovate Configuration
@@ -19,3 +26,8 @@ rules:
     params:
       extends: "github>reearth/renovate-config"
       min_stability_days: "7"
+    # scope:
+    #   include_repos:
+    #     - api
+    #     - web-*
+    #     - backend-*

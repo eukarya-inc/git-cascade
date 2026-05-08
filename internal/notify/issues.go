@@ -203,7 +203,6 @@ func syncRepoComments(ctx context.Context, client *github.Client, owner, repo st
 	errs := make(chan error, len(work))
 	var wg sync.WaitGroup
 	for range consolidatedCommentWorkers {
-		wg.Add(1)
 		wg.Go(func() {
 			for w := range jobs {
 				if err := processCommentWork(ctx, client, owner, repo, issueNumber, w); err != nil {

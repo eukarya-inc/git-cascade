@@ -286,6 +286,50 @@ rules:
 	}
 }
 
+func TestParseRule_MapListParams(t *testing.T) {
+	yaml := `
+version: "1"
+rules:
+  - id: branch-protection
+    name: Branch Protection
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      additional_branches:
+        development:
+          - "eukarya-inc/repository1"
+          - "eukarya-inc/repository2"
+        securebranch:
+          - "eukarya-inc/repository3"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+
+	if rule.Params["require_reviews"] != "true" {
+		t.Errorf("expected require_reviews=true, got %q", rule.Params["require_reviews"])
+	}
+	if len(rule.ListParams) != 0 {
+		t.Errorf("expected empty ListParams, got %v", rule.ListParams)
+	}
+
+	m := rule.MapListParams["additional_branches"]
+	if m == nil {
+		t.Fatal("expected MapListParams[additional_branches] to be set")
+	}
+	dev := m["development"]
+	if len(dev) != 2 || dev[0] != "eukarya-inc/repository1" || dev[1] != "eukarya-inc/repository2" {
+		t.Errorf("unexpected development repos: %v", dev)
+	}
+	sec := m["securebranch"]
+	if len(sec) != 1 || sec[0] != "eukarya-inc/repository3" {
+		t.Errorf("unexpected securebranch repos: %v", sec)
+	}
+}
+
 func TestBoolDefault(t *testing.T) {
 	if BoolDefault(nil, true) != true {
 		t.Error("expected true for nil with default true")

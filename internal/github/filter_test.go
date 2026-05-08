@@ -142,6 +142,24 @@ func TestRepoFilterFromScope_IncludeRepos(t *testing.T) {
 	assertNames(t, got, want)
 }
 
+func TestFilterExcludeReposGlob(t *testing.T) {
+	f := RepoFilter{IncludePublic: true, IncludePrivate: true, ExcludeRepos: []string{"old-*"}}
+	got := repoNames(f.Apply(testRepos()))
+	want := []string{"api", "web", "docs", "infra"}
+	assertNames(t, got, want)
+}
+
+func TestFilterIncludeReposGlob(t *testing.T) {
+	f := RepoFilter{
+		IncludePublic:  true,
+		IncludePrivate: true,
+		IncludeRepos:   []string{"*-service", "api"},
+	}
+	got := repoNames(f.Apply(testRepos()))
+	want := []string{"api", "old-service"}
+	assertNames(t, got, want)
+}
+
 func assertNames(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

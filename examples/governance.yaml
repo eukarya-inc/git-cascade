@@ -1,24 +1,64 @@
 rules:
+  - id: branch-protection
+    name: Branch Protection
+    description: Default branch must have branch protection rules enabled
+    severity: error
+    enabled: true
+    params:
+      require_reviews: "true"
+      required_reviewers: "1"
+      # Flat list — check these branches for every repo in the scan:
+      # additional_branches:
+      #   - develop
+      #   - staging
+      #
+      # Map format — check each branch only for the listed repos (owner/repo).
+      # Use this when only a subset of repos have a given branch.
+      additional_branches:
+        development:
+          - "eukarya-inc/repository1"
+          - "eukarya-inc/repository2"
+        securebranch:
+          - "eukarya-inc/repository3"
+          - "eukarya-inc/repository4"
+    # scope:
+    #   exclude_repos:
+    #     - testing
+    #     - sandbox-*
   - id: readme-exists
     name: README Exists
     description: Repository must contain a README file
     severity: warning
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
 
   - id: license-exists
     name: License Exists
     description: Repository must contain a LICENSE file
     severity: warning
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
+    #     - testing
 
   - id: codeowners-exists
     name: CODEOWNERS Exists
     description: Repository must have a CODEOWNERS file in .github/, root, or docs/
     severity: warning
     enabled: true
+    # scope:
+    #   include_repos:
+    #     - api
+    #     - backend-*
 
   - id: external-collaborators
     name: External Collaborators
     description: Admin privileges must be restricted to org members only (no external admin collaborators)
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*

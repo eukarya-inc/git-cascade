@@ -1,6 +1,8 @@
 package github
 
 import (
+	"path"
+
 	"github.com/eukarya-inc/git-cascade/internal/config"
 )
 
@@ -39,10 +41,9 @@ func (f RepoFilter) Apply(repos []Repository) []Repository {
 }
 
 func (f RepoFilter) applyIncludeList(repos []Repository) []Repository {
-	include := toSet(f.IncludeRepos)
 	var out []Repository
 	for _, r := range repos {
-		if include[r.Name] {
+		if matchesAny(r.Name, f.IncludeRepos) {
 			out = append(out, r)
 		}
 	}
@@ -50,10 +51,9 @@ func (f RepoFilter) applyIncludeList(repos []Repository) []Repository {
 }
 
 func (f RepoFilter) applyFilters(repos []Repository) []Repository {
-	exclude := toSet(f.ExcludeRepos)
 	var out []Repository
 	for _, r := range repos {
-		if exclude[r.Name] {
+		if matchesAny(r.Name, f.ExcludeRepos) {
 			continue
 		}
 		if !f.IncludeArchived && r.Archived {
@@ -73,10 +73,14 @@ func (f RepoFilter) applyFilters(repos []Repository) []Repository {
 	return out
 }
 
-func toSet(items []string) map[string]bool {
-	m := make(map[string]bool, len(items))
-	for _, item := range items {
-		m[item] = true
+// matchesAny reports whether name matches any of the given glob patterns.
+// Exact strings are also supported (they are valid glob patterns).
+// Malformed patterns never match.
+func matchesAny(name string, patterns []string) bool {
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, name); ok {
+			return true
+		}
 	}
-	return m
+	return false
 }

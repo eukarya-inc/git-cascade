@@ -410,6 +410,139 @@ func TestCheck_AdditionalBranchSameAsDefault_DeduplicatedAndPasses(t *testing.T)
 	}
 }
 
+func TestCheck_AdditionalBranches_MapFormat_RepoIncluded(t *testing.T) {
+	// development branch listed for org/repo → should be checked and pass.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		protectedBranches: map[string]bool{"main": true, "development": true},
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		MapListParams: map[string]map[string][]string{
+			"additional_branches": {
+				"development": {"org/repo", "org/other"},
+			},
+		},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Message)
+	}
+	if !strings.Contains(result.Message, "development") {
+		t.Errorf("expected message to mention 'development', got %q", result.Message)
+	}
+}
+
+func TestCheck_AdditionalBranches_MapFormat_RepoNotIncluded(t *testing.T) {
+	// development branch not listed for org/repo → should not be checked.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		protectedBranches: map[string]bool{"main": true}, // development not protected but shouldn't matter
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		MapListParams: map[string]map[string][]string{
+			"additional_branches": {
+				"development": {"org/other-repo"}, // org/repo not listed
+			},
+		},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass (branch skipped for this repo), got %s: %s", result.Status, result.Message)
+	}
+	if strings.Contains(result.Message, "development") {
+		t.Errorf("expected 'development' not in message (not checked for this repo), got %q", result.Message)
+	}
+}
+
+func TestCheck_AdditionalBranches_MapFormat_UnprotectedFails(t *testing.T) {
+	// development branch listed for org/repo but not protected → fail.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		protectedBranches: map[string]bool{"main": true}, // development unprotected
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		MapListParams: map[string]map[string][]string{
+			"additional_branches": {
+				"development": {"org/repo"},
+			},
+		},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
+	}
+	if !strings.Contains(result.Message, "development") {
+		t.Errorf("expected message to mention 'development', got %q", result.Message)
+	}
+}
+
+func TestCheck_AdditionalBranches_MapFormat_MultipleBranches(t *testing.T) {
+	// Two branches mapped; repo is only in one of them.
+	checker := &branchProtectionChecker{}
+	srv := &branchProtectionServer{
+		protectedBranches: map[string]bool{"main": true, "development": true},
+	}
+	_, client := srv.serve(t)
+
+	repo := repoWithDefault("main")
+	rule := config.Rule{
+		ID:       "branch-protection",
+		Name:     "branch-protection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		MapListParams: map[string]map[string][]string{
+			"additional_branches": {
+				"development": {"org/repo"},
+				"securebranch": {"org/other-repo"}, // not checked for org/repo
+			},
+		},
+	}
+
+	result, err := checker.Check(context.Background(), client, repo, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Message)
+	}
+	if strings.Contains(result.Message, "securebranch") {
+		t.Errorf("'securebranch' should not appear (repo not listed), got %q", result.Message)
+	}
+}
+
 // — checkBranchProtection helper branches ————————————————————————————————————
 
 func TestCheck_RulesetActive_ReviewParamFail(t *testing.T) {

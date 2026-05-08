@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
@@ -256,6 +257,8 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 	}, nil
 }
 
+const archiveMaxRetries = 3
+
 // scanRepoArchive downloads the repo as a gzipped tarball (single API call) and
 // scans each file's content against activeRules.
 // Returns nil violations (not an empty slice) when HEAD cannot be resolved.
@@ -271,7 +274,27 @@ func (c *secretDetectionChecker) scanRepoArchive(ctx context.Context, client *gi
 		return nil, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL.String(), nil)
+	var lastErr error
+	for attempt := range archiveMaxRetries {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+
+		violations, err := c.tryReadArchive(ctx, archiveURL.String(), repo, activeRules)
+		if err == nil {
+			return violations, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func (c *secretDetectionChecker) tryReadArchive(ctx context.Context, archiveURL string, repo gh.Repository, activeRules []secretRule) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building archive request for %s: %w", repo.FullName, err)
 	}
@@ -296,9 +319,8 @@ func (c *secretDetectionChecker) scanRepoArchive(ctx context.Context, client *gi
 
 	tr := tar.NewReader(gz)
 
-	var violations []string
 	// Use an empty slice (not nil) so the caller can distinguish "scanned, clean" from "HEAD not found".
-	violations = []string{}
+	violations := []string{}
 
 	for {
 		hdr, err := tr.Next()

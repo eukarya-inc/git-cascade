@@ -216,11 +216,19 @@ scope:
   include_private: true
   include_archived: false
   include_forked: false  # Exclude forked repositories (default: false)
-  include_repos:         # Only scan these repos (overrides all other scope filters)
-    - api
-    - web
-  exclude_repos:         # Skip these repos
+  include_repos:         # Only scan these repos; overrides all other scope filters.
+    - api                # Exact names and glob patterns are both supported.
+    - web-*              # Matches web-frontend, web-admin, etc.
+  exclude_repos:         # Skip these repos (glob patterns supported)
     - sandbox
+    - legacy-*
+
+# Restrict which rules run. Patterns are glob-matched against rule IDs.
+# include_rules:         # When set, only matching rules run; exclude_rules is ignored.
+#   - secret-*
+#   - branch-protection
+# exclude_rules:         # Skip matching rules.
+#   - harden-runner-required
 
 output:
   format: table         # table | json | csv | sarif
@@ -261,12 +269,85 @@ rules:
     params:               # Rule-specific parameters (optional)
       require_reviews: "true"
       required_reviewers: "1"
-      additional_branches:  # Also check these branches in addition to the default branch
-        - develop
-        - staging
+      # Flat list — check these branches for every repo:
+      # additional_branches:
+      #   - develop
+      #   - staging
+      # Map format — check each branch only for the listed repos (owner/repo):
+      additional_branches:
+        development:
+          - eukarya-inc/repository1
+          - eukarya-inc/repository2
+        securebranch:
+          - eukarya-inc/repository3
+
+  - id: actions-pinned
+    name: Actions Pinned to SHA
+    severity: error
+    enabled: true
+    scope:                # Per-rule scope overrides the top-level scope for this rule only.
+      exclude_repos:      # Glob patterns matched against the short repo name.
+        - testing
+        - sandbox-*
+      # include_repos takes precedence over exclude_repos when both are set:
+      # include_repos:
+      #   - super-important-repo
 ```
 
+#### Rule-level scope
+
+Each rule can define its own `scope` block to override the top-level scope **for that rule only**. This lets you skip noisy repos for one rule without changing the global scan target.
+
+```yaml
+rules:
+  - id: harden-runner-required
+    enabled: true
+    severity: error
+    scope:
+      exclude_repos:
+        - testing
+        - sandbox-*
+
+  - id: branch-protection
+    enabled: true
+    severity: error
+    scope:
+      include_repos:       # include_repos takes precedence — only these repos are checked.
+        - critical-api
+        - payments-service
+```
+
+Behaviour:
+- When `include_repos` is set on a rule, only matching repositories are checked by that rule; `exclude_repos` is ignored.
+- When only `exclude_repos` is set, all repositories except those matching the patterns are checked.
+- Patterns use glob syntax (`*` matches any characters, `?` matches one character, `[abc]` matches a character class), matched against the **short repository name** (not `owner/repo`).
+- A rule with no `scope` block inherits no restriction from this field; the top-level scope still determines which repos are in the scan.
+
 CLI flags always override the corresponding YAML config key when explicitly provided.
+
+### Filtering rules
+
+Two top-level fields let you limit which rules run without editing individual rule entries.
+
+**`include_rules`** — whitelist. When set, only rules whose IDs match at least one pattern run; `exclude_rules` is ignored.
+
+**`exclude_rules`** — blacklist. Rules whose IDs match any pattern are skipped.
+
+Patterns use glob syntax matched against the rule ID.
+
+```yaml
+# Run only secret-detection and branch-protection rules:
+include_rules:
+  - secret-*
+  - branch-protection
+
+# Or skip a noisy rule while keeping everything else:
+exclude_rules:
+  - generic-secret-assignment
+  - harden-runner-required
+```
+
+These fields complement the per-rule `enabled: false` flag — use `enabled` to permanently disable a rule in config, and `include_rules`/`exclude_rules` for ad-hoc run-time filtering (e.g. running only security rules in a nightly job).
 
 ### Available Rules
 
@@ -297,7 +378,11 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 |-------|------|-------------|
 | `require_reviews` | `"true"` / `"false"` | Require pull request reviews before merging |
 | `required_reviewers` | integer string, e.g. `"2"` | Minimum number of required approving reviewers (requires `require_reviews: "true"`) |
-| `additional_branches` | YAML list of strings | Extra branches to check in addition to the default branch |
+| `additional_branches` | flat list **or** branch→repos map | Extra branches to check beyond the default branch (see formats below) |
+
+`additional_branches` supports two formats:
+
+**Flat list** — every listed branch is checked for all repos in the scan:
 
 ```yaml
 - id: branch-protection
@@ -309,6 +394,24 @@ CLI flags always override the corresponding YAML config key when explicitly prov
     additional_branches:
       - develop
       - staging
+```
+
+**Map format** — each branch is checked only for the repos explicitly listed under it (value is a list of `owner/repo` full names). Use this when only a subset of repos have a given branch:
+
+```yaml
+- id: branch-protection
+  severity: error
+  enabled: true
+  params:
+    require_reviews: "true"
+    required_reviewers: "2"
+    additional_branches:
+      development:
+        - eukarya-inc/repository1
+        - eukarya-inc/repository2
+      securebranch:
+        - eukarya-inc/repository3
+        - eukarya-inc/repository4
 ```
 
 **`renovate-config`**

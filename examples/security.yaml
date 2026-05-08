@@ -1,62 +1,78 @@
 rules:
-  - id: branch-protection
-    name: Branch Protection
-    description: Default branch must have branch protection rules enabled
-    severity: error
-    enabled: true
-    params:
-      additional_branches:
-        - "development"
-      require_reviews: "true"
-      required_reviewers: "1"
-
   - id: actions-pinned
     name: Actions Pinned to SHA
     description: All GitHub Actions in workflows must use pinned SHA references instead of tags
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - testing
+    #     - sandbox-*
 
   - id: dockerfile-digest
     name: Dockerfile Digest Pinning
     description: Dockerfile FROM images must use SHA256 digest pinning (not :latest or tags)
     severity: error
     enabled: true
+    # scope:
+    #   include_repos:
+    #     - api
+    #     - backend-*
 
   - id: no-env-files
     name: No .env Files
     description: .env, .env.local, .env.production and similar files must not be committed (.env.example is allowed)
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
 
   - id: ai-config-safety
     name: AI Config Safety
     description: .claude/, .cursor/, and .mcp.json must not contain executable hooks or command definitions
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
 
   - id: no-pull-request-target
     name: No pull_request_target Event
     description: Workflows must not use pull_request_target, which runs in the base branch context and exposes secrets to untrusted fork code
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - testing
 
   - id: no-secrets-inherit
     name: No secrets inherit
     description: 'Reusable workflow calls must not use "secrets: inherit", which exposes all caller secrets violating least-privilege'
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - testing
 
   - id: harden-runner-required
     name: Harden Runner Required
     description: Every job in public repository workflows must use step-security/harden-runner as the first step
     severity: warning
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - testing
+    #     - sandbox-*
 
   - id: secret-detection
     name: Secret Detection
     description: Scan repository files for committed secrets such as API keys, tokens, private keys, and credentials in URLs
     severity: error
     enabled: true
+    # scope:
+    #   exclude_repos:
+    #     - sandbox-*
     # params:
     #   # Restrict to a specific subset of built-in detection rules (optional).
     #   # When omitted, all rules are active.

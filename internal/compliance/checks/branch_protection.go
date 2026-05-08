@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -30,9 +31,23 @@ func (c *branchProtectionChecker) Check(ctx context.Context, client *github.Clie
 	}
 
 	branches := []string{defaultBranch}
-	for _, b := range rule.ListParams["additional_branches"] {
-		if b != defaultBranch {
-			branches = append(branches, b)
+	if repoMap, ok := rule.MapListParams["additional_branches"]; ok {
+		// New format: branch → list of repo full names.
+		// Only check branches whose repo list includes this repo.
+		for branch, repos := range repoMap {
+			if branch == defaultBranch {
+				continue
+			}
+			if slices.Contains(repos, repo.FullName) {
+				branches = append(branches, branch)
+			}
+		}
+	} else {
+		// Legacy flat-list format: check all listed branches for every repo.
+		for _, b := range rule.ListParams["additional_branches"] {
+			if b != defaultBranch {
+				branches = append(branches, b)
+			}
 		}
 	}
 

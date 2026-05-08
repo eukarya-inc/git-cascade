@@ -10,11 +10,16 @@ import (
 
 // ComplianceConfig is the top-level configuration loaded from YAML.
 type ComplianceConfig struct {
-	Version  string   `yaml:"version"`
-	Scope    Scope    `yaml:"scope,omitempty"`
-	Output   Output   `yaml:"output,omitempty"`
-	Notify   Notify   `yaml:"notify,omitempty"`
-	Rules    []Rule   `yaml:"rules"`
+	Version      string   `yaml:"version"`
+	Scope        Scope    `yaml:"scope,omitempty"`
+	Output       Output   `yaml:"output,omitempty"`
+	Notify       Notify   `yaml:"notify,omitempty"`
+	Rules        []Rule   `yaml:"rules"`
+	// IncludeRules, when non-empty, restricts the scan to only rules whose IDs
+	// match at least one glob pattern. ExcludeRules is ignored when this is set.
+	IncludeRules []string `yaml:"include_rules,omitempty"`
+	// ExcludeRules removes rules whose IDs match any glob pattern from the scan.
+	ExcludeRules []string `yaml:"exclude_rules,omitempty"`
 }
 
 // Output configures default output behaviour.
@@ -92,13 +97,28 @@ type Scope struct {
 
 // Rule defines a single compliance check.
 type Rule struct {
-	ID          string              `yaml:"id"`
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description"`
-	Severity    Severity            `yaml:"severity"`
-	Enabled     bool                `yaml:"enabled"`
-	Params      map[string]string   `yaml:"params,omitempty"`
-	ListParams  map[string][]string `yaml:"-"`
+	ID          string                       `yaml:"id"`
+	Name        string                       `yaml:"name"`
+	Description string                       `yaml:"description"`
+	Severity    Severity                     `yaml:"severity"`
+	Enabled     bool                         `yaml:"enabled"`
+	// Scope, when set, overrides the top-level scope for this rule only.
+	// Only include_repos and exclude_repos are honoured at the rule level;
+	// boolean visibility flags (include_public, include_private, etc.) are ignored.
+	Scope       *RuleScope                   `yaml:"scope,omitempty"`
+	Params      map[string]string            `yaml:"params,omitempty"`
+	ListParams  map[string][]string          `yaml:"-"`
+	// MapListParams holds params whose value is a mapping of string → []string.
+	// Example: additional_branches: {development: [org/repo1, org/repo2]}.
+	MapListParams map[string]map[string][]string `yaml:"-"`
+}
+
+// RuleScope restricts which repositories a single rule runs against.
+// Patterns are glob-matched against the repository name (short name, not owner/repo).
+// include_repos takes precedence over exclude_repos when both are set.
+type RuleScope struct {
+	IncludeRepos []string `yaml:"include_repos,omitempty"`
+	ExcludeRepos []string `yaml:"exclude_repos,omitempty"`
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler so that the params block can hold
@@ -107,11 +127,12 @@ type Rule struct {
 func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
 	// Use an alias type to avoid infinite recursion when calling Decode.
 	type ruleAlias struct {
-		ID          string   `yaml:"id"`
-		Name        string   `yaml:"name"`
-		Description string   `yaml:"description"`
-		Severity    Severity `yaml:"severity"`
-		Enabled     bool     `yaml:"enabled"`
+		ID          string     `yaml:"id"`
+		Name        string     `yaml:"name"`
+		Description string     `yaml:"description"`
+		Severity    Severity   `yaml:"severity"`
+		Enabled     bool       `yaml:"enabled"`
+		Scope       *RuleScope `yaml:"scope,omitempty"`
 	}
 	var alias ruleAlias
 	if err := value.Decode(&alias); err != nil {
@@ -122,6 +143,7 @@ func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
 	r.Description = alias.Description
 	r.Severity = alias.Severity
 	r.Enabled = alias.Enabled
+	r.Scope = alias.Scope
 
 	// Find the params mapping node.
 	for i := 0; i+1 < len(value.Content); i += 2 {
@@ -137,6 +159,24 @@ func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
 			k := valNode.Content[j].Value
 			v := valNode.Content[j+1]
 			switch v.Kind {
+			case yaml.MappingNode:
+				// mapping of string → []string, e.g.:
+				//   additional_branches:
+				//     development: [org/repo1, org/repo2]
+				m := make(map[string][]string)
+				for ki := 0; ki+1 < len(v.Content); ki += 2 {
+					mk := v.Content[ki].Value
+					mv := v.Content[ki+1]
+					var items []string
+					for _, item := range mv.Content {
+						items = append(items, item.Value)
+					}
+					m[mk] = items
+				}
+				if r.MapListParams == nil {
+					r.MapListParams = make(map[string]map[string][]string)
+				}
+				r.MapListParams[k] = m
 			case yaml.SequenceNode:
 				if r.ListParams == nil {
 					r.ListParams = make(map[string][]string)
