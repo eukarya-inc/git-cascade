@@ -1,6 +1,9 @@
 package checks
 
 import (
+	"archive/tar"
+	"compress/gzip"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -11,66 +14,62 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
-// fakeGitHub holds per-path responses for the GitHub contents API.
-// Paths are matched as <owner>/<repo>/<filePath>.
+// fakeGitHub holds per-path responses for the GitHub contents and archive APIs.
 type fakeGitHub struct {
-	// files maps a path key to raw file content (nil = 404).
+	// files maps "owner/repo/filePath" to raw file content (nil = 404).
 	files map[string][]byte
-	// dirs maps a directory path key to a list of entry names.
+	// dirs maps "owner/repo/dirPath" to a list of entry names (for contents API).
 	dirs map[string][]string
-	// gitTrees maps "owner/repo/sha" to a flat list of blob paths (for the Git trees API).
-	gitTrees map[string][]string
-	// gitRefs maps "owner/repo/refName" to a SHA (for the Git refs API).
-	gitRefs map[string]string
+	// hasArchive tracks repos for which an archive should be served (even if empty).
+	// Repos not in this set return 404 from the tarball endpoint.
+	hasArchive map[string]bool
 }
 
 // newFakeGitHub creates a fakeGitHub with empty maps.
 func newFakeGitHub() *fakeGitHub {
 	return &fakeGitHub{
-		files:    make(map[string][]byte),
-		dirs:     make(map[string][]string),
-		gitTrees: make(map[string][]string),
-		gitRefs:  make(map[string]string),
+		files:      make(map[string][]byte),
+		dirs:       make(map[string][]string),
+		hasArchive: make(map[string]bool),
 	}
 }
 
 // setFile registers file content for owner/repo/filepath.
+// All registered files are included in the tarball served by the archive endpoint.
 func (f *fakeGitHub) setFile(owner, repo, filePath string, content []byte) {
 	f.files[owner+"/"+repo+"/"+filePath] = content
+	f.hasArchive[owner+"/"+repo] = true
 }
 
 // setDir registers a directory listing for owner/repo/dirPath.
-// entryNames are the file names inside the directory.
 func (f *fakeGitHub) setDir(owner, repo, dirPath string, entryNames []string) {
 	f.dirs[owner+"/"+repo+"/"+dirPath] = entryNames
 }
 
-// setGitRef registers a branch HEAD SHA for the Git refs API.
-// branch should be the short branch name (e.g. "main"), not the full ref.
-func (f *fakeGitHub) setGitRef(owner, repo, branch, sha string) {
-	f.gitRefs[owner+"/"+repo+"/refs/heads/"+branch] = sha
-}
+// setGitRef is a no-op kept for call-site compatibility. The tarball approach
+// does not need a separate HEAD-resolution step.
+func (f *fakeGitHub) setGitRef(_, _, _, _ string) {}
 
-// setGitTree registers a flat list of blob file paths for a tree SHA.
-// The tree is returned by the Git trees API when queried with recursive=1.
-func (f *fakeGitHub) setGitTree(owner, repo, treeSHA string, filePaths []string) {
-	f.gitTrees[owner+"/"+repo+"/"+treeSHA] = filePaths
+// setGitTree marks owner/repo as having a valid archive (so the tarball endpoint
+// returns 200 instead of 404). This covers repos with an empty file list where
+// setFile is never called.
+func (f *fakeGitHub) setGitTree(owner, repo, _ string, _ []string) {
+	f.hasArchive[owner+"/"+repo] = true
 }
 
 // serve starts an httptest.Server that handles:
-//   - /api/v3/repos/{owner}/{repo}/contents/{path}  (file/dir contents)
-//   - /api/v3/repos/{owner}/{repo}/git/refs/{ref}   (branch HEAD SHA)
-//   - /api/v3/repos/{owner}/{repo}/git/trees/{sha}  (recursive file tree)
+//   - /api/v3/repos/{owner}/{repo}/contents/{path}       (file/dir contents)
+//   - /api/v3/repos/{owner}/{repo}/tarball/{ref}          (archive download redirect)
+//   - /tarball/{owner}/{repo}                             (actual gzipped tar)
 //
 // go-github's WithEnterpriseURLs prefixes all paths with /api/v3/.
 func (f *fakeGitHub) serve(t *testing.T) (*httptest.Server, *github.Client) {
 	t.Helper()
 	mux := http.NewServeMux()
 
-	const prefix = "/api/v3/repos/"
-	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
-		rest := r.URL.Path[len(prefix):]
-		// Split into at most 4 parts: owner / repo / section / rest
+	const repoPrefix = "/api/v3/repos/"
+	mux.HandleFunc(repoPrefix, func(w http.ResponseWriter, r *http.Request) {
+		rest := r.URL.Path[len(repoPrefix):]
 		parts := splitN(rest, "/", 4)
 		if len(parts) < 3 {
 			http.NotFound(w, r)
@@ -85,11 +84,25 @@ func (f *fakeGitHub) serve(t *testing.T) (*httptest.Server, *github.Client) {
 		switch section {
 		case "contents":
 			f.serveContents(w, owner, repo, tail)
-		case "git":
-			f.serveGit(w, owner, repo, tail)
+		case "tarball":
+			// Redirect to the tarball download endpoint using an absolute URL so
+			// that the Location header is fully qualified (go-github parses it as-is).
+			http.Redirect(w, r, "http://"+r.Host+"/tarball/"+owner+"/"+repo, http.StatusFound)
 		default:
 			http.NotFound(w, r)
 		}
+	})
+
+	// Serve the actual gzipped tarball (after the redirect).
+	mux.HandleFunc("/tarball/", func(w http.ResponseWriter, r *http.Request) {
+		rest := r.URL.Path[len("/tarball/"):]
+		parts := splitN(rest, "/", 2)
+		if len(parts) < 2 {
+			http.NotFound(w, r)
+			return
+		}
+		owner, repo := parts[0], parts[1]
+		f.serveTarball(w, owner, repo)
 	})
 
 	srv := httptest.NewServer(mux)
@@ -147,63 +160,44 @@ func (f *fakeGitHub) serveContents(w http.ResponseWriter, owner, repo, filePath 
 	http.NotFound(w, nil)
 }
 
-// serveGit handles /repos/{owner}/{repo}/git/{refs/... | trees/...}.
-func (f *fakeGitHub) serveGit(w http.ResponseWriter, owner, repo, tail string) {
-	// tail is e.g. "refs/heads/main" or "trees/abc123"
-	parts := splitN(tail, "/", 2)
-	if len(parts) < 2 {
+// serveTarball builds an in-memory gzipped tar from all files registered for
+// owner/repo and writes it to w. Returns 404 when no archive has been set up
+// for the repo (simulates a missing/empty repository). GitHub tarballs wrap
+// entries under a top-level directory; we use "owner-repo-testsha/" as that prefix.
+func (f *fakeGitHub) serveTarball(w http.ResponseWriter, owner, repo string) {
+	repoKey := owner + "/" + repo + "/"
+
+	// Check whether this repo has an archive registered (even an empty one).
+	if !f.hasArchive[owner+"/"+repo] {
 		http.NotFound(w, nil)
 		return
 	}
-	kind, rest := parts[0], parts[1]
 
-	switch kind {
-	case "ref":
-		// GetRef uses /git/ref/{ref} (singular). rest is e.g. "heads/main".
-		// We store keys as "owner/repo/refs/heads/branch" so prefix "refs/".
-		key := owner + "/" + repo + "/refs/" + rest
-		sha, ok := f.gitRefs[key]
-		if !ok {
-			http.NotFound(w, nil)
-			return
-		}
-		resp := map[string]any{
-			"ref": "refs/" + rest,
-			"object": map[string]any{
-				"type": "commit",
-				"sha":  sha,
-			},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+	prefix := owner + "-" + repo + "-testsha/"
 
-	case "trees":
-		// rest is the tree SHA
-		key := owner + "/" + repo + "/" + rest
-		filePaths, ok := f.gitTrees[key]
-		if !ok {
-			http.NotFound(w, nil)
-			return
-		}
-		var entries []map[string]any
-		for _, p := range filePaths {
-			entries = append(entries, map[string]any{
-				"path": p,
-				"type": "blob",
-				"sha":  "deadbeef",
-			})
-		}
-		resp := map[string]any{
-			"sha":       rest,
-			"tree":      entries,
-			"truncated": false,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
 
-	default:
-		http.NotFound(w, nil)
+	for key, content := range f.files {
+		if len(key) <= len(repoKey) || key[:len(repoKey)] != repoKey {
+			continue
+		}
+		filePath := key[len(repoKey):]
+		tw.WriteHeader(&tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     prefix + filePath,
+			Size:     int64(len(content)),
+			Mode:     0o644,
+		})
+		tw.Write(content)
 	}
+
+	tw.Close()
+	gw.Close()
+
+	w.Header().Set("Content-Type", "application/x-gzip")
+	w.Write(buf.Bytes())
 }
 
 // splitN splits s by sep into at most n parts.
@@ -229,4 +223,3 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
-

@@ -1,8 +1,12 @@
 package checks
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
 
@@ -203,7 +207,6 @@ type secretDetectionChecker struct{}
 func (c *secretDetectionChecker) ID() string { return "secret-detection" }
 
 func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
-	// Resolve which rules to apply: all built-in by default, restricted by params.
 	activeRules := resolveActiveRules(rule)
 	if len(activeRules) == 0 {
 		return &compliance.Result{
@@ -216,12 +219,12 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 		}, nil
 	}
 
-	// Fetch the full recursive file tree in a single API call.
-	headSHA, err := gh.GetBranchHEAD(ctx, client, repo.Owner, repo.Name, repo.DefaultBranch)
+	violations, err := c.scanRepoArchive(ctx, client, repo, activeRules)
 	if err != nil {
 		return nil, err
 	}
-	if headSHA == "" {
+	if violations == nil {
+		// nil (not empty slice) signals that the repo HEAD could not be resolved.
 		return &compliance.Result{
 			RuleID:   rule.ID,
 			RuleName: rule.Name,
@@ -230,47 +233,6 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 			Severity: rule.Severity,
 			Message:  "could not resolve HEAD commit",
 		}, nil
-	}
-
-	tree, _, err := client.Git.GetTree(ctx, repo.Owner, repo.Name, headSHA, true)
-	if err != nil {
-		return nil, fmt.Errorf("fetching git tree for %s: %w", repo.FullName, err)
-	}
-
-	var violations []string
-	for _, entry := range tree.Entries {
-		if entry.GetType() != "blob" {
-			continue
-		}
-		path := entry.GetPath()
-		if shouldSkipPath(path) {
-			continue
-		}
-
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, repo.DefaultBranch)
-		if err != nil {
-			return nil, err
-		}
-		if content == nil {
-			continue
-		}
-
-		for _, sr := range activeRules {
-			if sr.fileFilter != nil && !sr.fileFilter.MatchString(path) {
-				continue
-			}
-			matches := sr.pattern.FindAllString(string(content), -1)
-			for _, m := range matches {
-				if isPlaceholder(m) {
-					continue
-				}
-				if sr.ignore != nil && sr.ignore(m) {
-					continue
-				}
-				violations = append(violations, fmt.Sprintf("%s (%s)", path, sr.id))
-				break // one violation per rule per file is enough
-			}
-		}
 	}
 
 	if len(violations) > 0 {
@@ -292,6 +254,105 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 		Severity: rule.Severity,
 		Message:  "no secrets detected",
 	}, nil
+}
+
+// scanRepoArchive downloads the repo as a gzipped tarball (single API call) and
+// scans each file's content against activeRules.
+// Returns nil violations (not an empty slice) when HEAD cannot be resolved.
+func (c *secretDetectionChecker) scanRepoArchive(ctx context.Context, client *github.Client, repo gh.Repository, activeRules []secretRule) ([]string, error) {
+	archiveURL, _, err := client.Repositories.GetArchiveLink(
+		ctx, repo.Owner, repo.Name,
+		github.Tarball,
+		&github.RepositoryContentGetOptions{Ref: repo.DefaultBranch},
+		3,
+	)
+	if err != nil {
+		// A 404 on the archive endpoint means the repo or branch doesn't exist.
+		return nil, nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("building archive request for %s: %w", repo.FullName, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("downloading archive for %s: %w", repo.FullName, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("archive download for %s returned HTTP %d", repo.FullName, resp.StatusCode)
+	}
+
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("opening gzip stream for %s: %w", repo.FullName, err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+
+	var violations []string
+	// Use an empty slice (not nil) so the caller can distinguish "scanned, clean" from "HEAD not found".
+	violations = []string{}
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading archive for %s: %w", repo.FullName, err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		// GitHub tarballs wrap everything in a top-level directory like
+		// "owner-repo-sha/". Strip that prefix to get the repo-relative path.
+		filePath := stripArchivePrefix(hdr.Name)
+		if shouldSkipPath(filePath) {
+			continue
+		}
+
+		content, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, fmt.Errorf("reading file %s from archive of %s: %w", filePath, repo.FullName, err)
+		}
+
+		text := string(content)
+		for _, sr := range activeRules {
+			if sr.fileFilter != nil && !sr.fileFilter.MatchString(filePath) {
+				continue
+			}
+			matches := sr.pattern.FindAllString(text, -1)
+			for _, m := range matches {
+				if isPlaceholder(m) {
+					continue
+				}
+				if sr.ignore != nil && sr.ignore(m) {
+					continue
+				}
+				violations = append(violations, fmt.Sprintf("%s (%s)", filePath, sr.id))
+				break // one violation per rule per file is enough
+			}
+		}
+	}
+
+	return violations, nil
+}
+
+// stripArchivePrefix removes the top-level directory that GitHub wraps tarballs
+// in (e.g. "owner-repo-abc1234/path/to/file" → "path/to/file").
+func stripArchivePrefix(name string) string {
+	if _, after, ok := strings.Cut(name, "/"); ok {
+		return after
+	}
+	return name
 }
 
 // resolveActiveRules returns the subset of secretRules to apply.
