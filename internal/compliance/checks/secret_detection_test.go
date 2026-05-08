@@ -1,7 +1,11 @@
 package checks
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
@@ -740,6 +744,123 @@ func TestResolveActiveRules_ExcludeParam(t *testing.T) {
 	for _, r := range got {
 		if r.id == "slack-token" || r.id == "slack-webhook" {
 			t.Errorf("excluded rule %s still present", r.id)
+		}
+	}
+}
+
+// ——— scanRepoArchive error paths ——————————————————————————————————————————————
+
+func TestSecretDetection_ArchiveHTTPError(t *testing.T) {
+	// Non-200/404 HTTP status from the tarball download must surface as an error.
+	fake := newFakeGitHub()
+	fake.tarballStatus = 500
+	_, client := fake.serve(t)
+	c := &secretDetectionChecker{}
+	_, err := c.Check(context.Background(), client, pubRepo(), baseRule("secret-detection"))
+	if err == nil {
+		t.Fatal("expected error for HTTP 500 from tarball endpoint, got nil")
+	}
+}
+
+func TestSecretDetection_CorruptGzip(t *testing.T) {
+	// A non-gzip body must surface as an error from gzip.NewReader.
+	fake := newFakeGitHub()
+	fake.tarballBody = []byte("this is not gzip data")
+	_, client := fake.serve(t)
+	c := &secretDetectionChecker{}
+	_, err := c.Check(context.Background(), client, pubRepo(), baseRule("secret-detection"))
+	if err == nil {
+		t.Fatal("expected error for corrupt gzip archive, got nil")
+	}
+}
+
+func TestSecretDetection_TarEntryDirectory(t *testing.T) {
+	// A tar archive containing only a directory entry (TypeDir) must be skipped
+	// without error and produce a pass result.
+	fake := newFakeGitHub()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     "prefix/subdir/",
+		Mode:     0o755,
+	})
+	tw.Close()
+	gw.Close()
+	fake.tarballBody = buf.Bytes()
+	_, client := fake.serve(t)
+
+	c := &secretDetectionChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("secret-detection"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass for dir-only archive, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// ——— Zero active rules (Check skip path) ———————————————————————————————————
+
+func TestSecretDetection_NoActiveRules_Skip(t *testing.T) {
+	// When "rules" param lists an id that doesn't exist, zero rules are resolved
+	// and Check returns StatusSkip without hitting the network at all.
+	fake := newFakeGitHub()
+	_, client := fake.serve(t)
+	c := &secretDetectionChecker{}
+	rule := config.Rule{
+		ID:       "secret-detection",
+		Name:     "secret-detection",
+		Severity: config.SeverityError,
+		Enabled:  true,
+		ListParams: map[string][]string{
+			"rules": {"nonexistent-rule-id"},
+		},
+	}
+	result, err := c.Check(context.Background(), client, pubRepo(), rule)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusSkip {
+		t.Errorf("expected skip when no rules active, got %s: %s", result.Status, result.Message)
+	}
+}
+
+// ——— stripArchivePrefix unit test ————————————————————————————————————————————
+
+func TestStripArchivePrefix(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"owner-repo-abc1234/path/to/file.go", "path/to/file.go"},
+		{"owner-repo-abc1234/README.md", "README.md"},
+		// No slash at all — returns the name unchanged (fallback branch).
+		{"no-slash-at-all", "no-slash-at-all"},
+		// Entry that is just the top-level directory itself (empty suffix).
+		{"topdir/", ""},
+	}
+	for _, tc := range cases {
+		got := stripArchivePrefix(tc.input)
+		if got != tc.want {
+			t.Errorf("stripArchivePrefix(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+// ——— isPlaceholder exact-match branch ————————————————————————————————————————
+
+func TestIsPlaceholder_ExactMatch(t *testing.T) {
+	// placeholderExact entries must be caught by the exact-match loop.
+	for _, exact := range placeholderExact {
+		if !isPlaceholder(exact) {
+			t.Errorf("isPlaceholder(%q) = false, want true (exact match)", exact)
+		}
+		// Upper-cased variant must also match (case-insensitive).
+		upper := strings.ToUpper(exact)
+		if !isPlaceholder(upper) {
+			t.Errorf("isPlaceholder(%q) = false, want true (exact match, upper)", upper)
 		}
 	}
 }

@@ -552,6 +552,69 @@ jobs:
 	}
 }
 
+func TestActionsPinnedChecker_NonYmlFileSkipped(t *testing.T) {
+	// Non-.yml/.yaml files in the workflows dir must be skipped entirely.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"README.md"})
+	// README.md is listed but not registered — if fetched it would 404 and fail.
+	_, client := fake.serve(t)
+
+	c := &actionsPinnedChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when only non-yml files present, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestPRTargetChecker_NonYmlFileSkipped(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"README.md"})
+	_, client := fake.serve(t)
+
+	c := &pullRequestTargetChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("no-pull-request-target"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when only non-yml files present, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretsInheritChecker_NonYmlFileSkipped(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"README.md"})
+	_, client := fake.serve(t)
+
+	c := &secretsInheritChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("no-secrets-inherit"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when only non-yml files present, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestHardenRunnerChecker_NonYmlFileSkipped(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"README.md"})
+	_, client := fake.serve(t)
+
+	c := &hardenRunnerChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("harden-runner-required"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	// No yml files → no jobs to check → pass (no violations found).
+	if result.Status == compliance.StatusFail {
+		t.Errorf("expected non-fail when only non-yml files present, got %s: %s", result.Status, result.Message)
+	}
+}
+
 // ——— dockerfileDigestChecker ——————————————————————————————————————————————————
 
 func TestDockerfileDigestChecker_EmptyRepo(t *testing.T) {

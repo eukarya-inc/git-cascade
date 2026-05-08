@@ -23,6 +23,13 @@ type fakeGitHub struct {
 	// hasArchive tracks repos for which an archive should be served (even if empty).
 	// Repos not in this set return 404 from the tarball endpoint.
 	hasArchive map[string]bool
+	// tarballStatus overrides the HTTP status code served by the tarball endpoint
+	// when non-zero (e.g. 500 to test error handling). Redirect still fires first;
+	// this applies to the final /tarball/ download handler.
+	tarballStatus int
+	// tarballBody overrides the raw bytes served by the tarball download endpoint.
+	// Useful for injecting a corrupt/non-gzip body.
+	tarballBody []byte
 }
 
 // newFakeGitHub creates a fakeGitHub with empty maps.
@@ -165,7 +172,18 @@ func (f *fakeGitHub) serveContents(w http.ResponseWriter, owner, repo, filePath 
 // for the repo (simulates a missing/empty repository). GitHub tarballs wrap
 // entries under a top-level directory; we use "owner-repo-testsha/" as that prefix.
 func (f *fakeGitHub) serveTarball(w http.ResponseWriter, owner, repo string) {
-	repoKey := owner + "/" + repo + "/"
+	// Inject a non-200 status if requested.
+	if f.tarballStatus != 0 {
+		w.WriteHeader(f.tarballStatus)
+		return
+	}
+
+	// Inject a raw body override (e.g. corrupt/non-gzip bytes).
+	if f.tarballBody != nil {
+		w.Header().Set("Content-Type", "application/x-gzip")
+		w.Write(f.tarballBody)
+		return
+	}
 
 	// Check whether this repo has an archive registered (even an empty one).
 	if !f.hasArchive[owner+"/"+repo] {
@@ -173,6 +191,7 @@ func (f *fakeGitHub) serveTarball(w http.ResponseWriter, owner, repo string) {
 		return
 	}
 
+	repoKey := owner + "/" + repo + "/"
 	prefix := owner + "-" + repo + "-testsha/"
 
 	var buf bytes.Buffer
