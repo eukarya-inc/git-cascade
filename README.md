@@ -37,8 +37,9 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_APP_ID` | `--app-id` | GitHub App ID |
 | `GIT_CASCADE_INSTALLATION_ID` | `--installation-id` | GitHub App Installation ID |
 | `GIT_CASCADE_PRIVATE_KEY_PATH` | `--private-key-path` | Path to the GitHub App private key PEM file |
-| `GIT_CASCADE_SLACK_WEBHOOK` | — | Slack Incoming Webhook URL |
-| `GIT_CASCADE_SLACK_BOT_TOKEN` | — | Slack bot user OAuth token (`xoxb-...`) |
+| `GIT_CASCADE_SLACK_WEBHOOK` | `--slack-webhook` | Slack Incoming Webhook URL |
+| `GIT_CASCADE_SLACK_BOT_TOKEN` | `--slack-bot-token` | Slack bot user OAuth token (`xoxb-...`) |
+| `GIT_CASCADE_SLACK_CHANNEL` | `--slack-channel` | Default Slack channel (webhook override or bot fallback) |
 | `GIT_CASCADE_SLACK_RESULTS_URL` | `--slack-results-url` | URL linked in the Slack notification (e.g. CI run URL) |
 | `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance` or `repo` |
 | `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated issue (mode=compliance) |
@@ -152,6 +153,9 @@ git-cascade scan --org myorg --format csv --output findings.csv
 
 # Scan only private repos
 git-cascade scan --org myorg --skip-public
+
+# Include forked repositories (excluded by default)
+git-cascade scan --org myorg --include-forked
 
 # Scan only specific repos
 git-cascade scan --org myorg --include-repo api --include-repo web
@@ -388,6 +392,9 @@ The simplest option. One webhook URL posts a single summary to a fixed channel. 
 # Via env var (recommended — avoids storing the URL in config)
 export GIT_CASCADE_SLACK_WEBHOOK=https://hooks.slack.com/services/xxx
 git-cascade scan --org myorg
+
+# Via CLI flag
+git-cascade scan --org myorg --slack-webhook https://hooks.slack.com/services/xxx
 ```
 
 ```yaml
@@ -403,8 +410,12 @@ notify:
 A Slack bot user OAuth token (`xoxb-...`) uses the Slack Web API (`chat.postMessage`) and supports routing results for specific repositories to different channels.
 
 ```bash
+# Via env var (recommended)
 export GIT_CASCADE_SLACK_BOT_TOKEN=xoxb-xxx
 git-cascade scan --org myorg
+
+# Via CLI flag
+git-cascade scan --org myorg --slack-bot-token xoxb-xxx
 ```
 
 ```yaml

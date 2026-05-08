@@ -31,6 +31,7 @@ var scanFlags struct {
 
 	// Repository filtering
 	includeArchived bool
+	includeForked   bool
 	skipPublic      bool
 	skipPrivate     bool
 	includeRepos    []string
@@ -41,12 +42,13 @@ var scanFlags struct {
 	outputPath string
 
 	// Notifications
-	slackWebhook   string
-	slackChannel   string
-	slackResultURL string
-	issueMode      string
-	issueRepo      string
-	issueLabels    []string
+	slackWebhook    string
+	slackBotToken   string
+	slackChannel    string
+	slackResultURL  string
+	issueMode       string
+	issueRepo       string
+	issueLabels     []string
 
 	concurrency int
 	silent      bool
@@ -72,6 +74,7 @@ func init() {
 
 	// Repository filtering
 	f.BoolVar(&scanFlags.includeArchived, "include-archived", false, "Include archived repositories in scan")
+	f.BoolVar(&scanFlags.includeForked, "include-forked", false, "Include forked repositories in scan")
 	f.BoolVar(&scanFlags.skipPublic, "skip-public", false, "Skip public repositories")
 	f.BoolVar(&scanFlags.skipPrivate, "skip-private", false, "Skip private repositories")
 	f.StringSliceVar(&scanFlags.includeRepos, "include-repo", nil, "Only scan these repositories (repeatable)")
@@ -83,6 +86,7 @@ func init() {
 
 	// Slack
 	f.StringVar(&scanFlags.slackWebhook, "slack-webhook", "", "Slack Incoming Webhook URL (or set GIT_CASCADE_SLACK_WEBHOOK)")
+	f.StringVar(&scanFlags.slackBotToken, "slack-bot-token", "", "Slack bot OAuth token for per-channel routing (or set GIT_CASCADE_SLACK_BOT_TOKEN)")
 	f.StringVar(&scanFlags.slackChannel, "slack-channel", "", "Override Slack channel")
 	f.StringVar(&scanFlags.slackResultURL, "slack-results-url", "", "URL to link in Slack notification")
 
@@ -190,6 +194,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("include-archived") {
 		filter.IncludeArchived = scanFlags.includeArchived
 	}
+	if cmd.Flags().Changed("include-forked") {
+		filter.IncludeForked = scanFlags.includeForked
+	}
 	if cmd.Flags().Changed("include-repo") {
 		filter.IncludeRepos = scanFlags.includeRepos
 	}
@@ -273,6 +280,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 	} else if v := os.Getenv("GIT_CASCADE_SLACK_WEBHOOK"); v != "" && slackCfg.WebhookURL == "" {
 		slackCfg.WebhookURL = v
 	}
+	if cmd.Flags().Changed("slack-bot-token") {
+		slackCfg.Enabled = true
+		slackCfg.BotToken = scanFlags.slackBotToken
+	} else if v := os.Getenv("GIT_CASCADE_SLACK_BOT_TOKEN"); v != "" && slackCfg.BotToken == "" {
+		slackCfg.BotToken = v
+	}
 	if cmd.Flags().Changed("slack-channel") {
 		slackCfg.Channel = scanFlags.slackChannel
 	} else if v := os.Getenv("GIT_CASCADE_SLACK_CHANNEL"); v != "" && slackCfg.Channel == "" {
@@ -284,7 +297,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if resultsURL == "" {
 		resultsURL = ciURL
 	}
-	if slackCfg.Enabled || slackCfg.WebhookURL != "" {
+	if slackCfg.Enabled || slackCfg.WebhookURL != "" || slackCfg.BotToken != "" {
 		logger.Info("sending slack notification")
 		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL, cfg.Scope); err != nil {
 			return fmt.Errorf("slack notification: %w", err)
