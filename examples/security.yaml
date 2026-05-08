@@ -51,3 +51,34 @@ rules:
     description: Every job in public repository workflows must use step-security/harden-runner as the first step
     severity: warning
     enabled: true
+
+  - id: secret-detection
+    name: Secret Detection
+    description: Scan repository files for committed secrets such as API keys, tokens, private keys, and credentials in URLs
+    severity: error
+    enabled: true
+    # params:
+    #   # Restrict to a specific subset of built-in detection rules (optional).
+    #   # When omitted, all rules are active.
+    #   rules:
+    #     - aws-access-key-id
+    #     - aws-secret-access-key
+    #     - github-token
+    #     - github-classic-token
+    #     - slack-token
+    #     - slack-webhook
+    #     - url-credentials              # http/https, ftp, sftp, ssh, git, postgresql, mysql, mongodb, redis, amqp, smtp, ldap
+    #     - private-key
+    #     - gcp-service-account-key
+    #     - stripe-secret-key
+    #     - stripe-publishable-key
+    #     - sendgrid-api-key
+    #     - twilio-api-key
+    #     - npm-auth-token
+    #     - ai-api-key
+    #     - ai-api-key-short-segment
+    #     - generic-secret-assignment
+    #
+    #   # Or exclude specific rules while keeping everything else active.
+    #   exclude_rules:
+    #     - generic-secret-assignment  # high false-positive rate in some codebases

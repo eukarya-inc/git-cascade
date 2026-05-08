@@ -287,6 +287,7 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 | `no-pull-request-target` | Workflows must not use `pull_request_target`, which runs in the base branch context and exposes secrets to untrusted fork code | — |
 | `no-secrets-inherit` | Reusable workflow calls must not use `secrets: inherit`, which exposes all caller secrets violating least-privilege | — |
 | `harden-runner-required` | Every job in public repository workflows must use `step-security/harden-runner` as the first step; skipped for private repositories | — |
+| `secret-detection` | Scan all committed files for secrets: API keys, tokens, private keys, and credentials embedded in URLs | `rules`, `exclude_rules` |
 
 #### Rule Params Reference
 
@@ -316,6 +317,59 @@ CLI flags always override the corresponding YAML config key when explicitly prov
 |-------|------|-------------|
 | `extends` | string | Required preset name (default: `github>reearth/renovate-config`) |
 | `min_stability_days` | integer string | Minimum `stabilityDays` value required in the Renovate config |
+
+**`secret-detection`**
+
+Scans every non-binary, non-vendored file in the repository for committed secrets. Uses the GitHub Git Trees API to retrieve the full file list in one call, then fetches and pattern-matches each file's content.
+
+Files and directories that are never scanned: `vendor/`, `node_modules/`, `dist/`, `build/`, `.git/`, and common binary extensions (`.png`, `.zip`, `.exe`, etc.).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `rules` | YAML list of strings | Run only these detection rule IDs. When omitted, all rules are active. |
+| `exclude_rules` | YAML list of strings | Remove these rule IDs from the active set. Ignored when `rules` is also set. |
+
+Built-in detection rules:
+
+| Rule ID | What it detects |
+|---------|----------------|
+| `aws-access-key-id` | AWS access key IDs (`AKIA*`, `ASIA*`, `AROA*`, …) |
+| `aws-secret-access-key` | 40-char AWS secret access keys preceded by a label |
+| `github-token` | GitHub fine-grained PATs and OAuth tokens (`ghp_`, `gho_`, `ghs_`, `github_pat_`) |
+| `github-classic-token` | 40-char hex GitHub classic PATs with label context |
+| `slack-token` | Slack OAuth tokens (`xoxb-`, `xoxa-`, `xoxp-`, `xoxr-`, `xoxs-`, `xoxo-`) |
+| `slack-webhook` | Slack Incoming Webhook URLs (`hooks.slack.com/services/…`) |
+| `url-credentials` | Credentials embedded in URLs across protocols: `http/https`, `ftp/ftps`, `sftp`, `ssh`, `git`, `postgresql/postgres`, `mysql`, `mongodb/mongodb+srv`, `redis/rediss`, `amqp/amqps`, `smtp/smtps`, `ldap/ldaps` |
+| `private-key` | PEM-encoded private keys (`-----BEGIN … PRIVATE KEY-----`) |
+| `gcp-service-account-key` | GCP service account JSON key files (matched by `private_key_id` field, `.json` files only) |
+| `stripe-secret-key` | Stripe live secret keys (`sk_live_…`) |
+| `stripe-publishable-key` | Stripe live publishable keys (`pk_live_…`) |
+| `sendgrid-api-key` | SendGrid API keys (`SG.…`) |
+| `twilio-api-key` | Twilio API keys (`SK` + 32 hex chars) |
+| `npm-auth-token` | npm auth tokens in `.npmrc` files (`_authToken=…`) |
+| `ai-api-key` | AI provider API keys — OpenAI (`sk-proj-…`), Anthropic (`sk-ant-…`), and similar long-segment `sk-` keys |
+| `ai-api-key-short-segment` | OpenRouter / 9router-style keys (`sk-<hex>-<alnum>-<hex>`) |
+| `generic-secret-assignment` | Generic `password=`, `api_key=`, `secret=` assignments with values ≥16 chars |
+
+```yaml
+- id: secret-detection
+  name: Secret Detection
+  description: Scan repository files for committed secrets
+  severity: error
+  enabled: true
+  params:
+    # Run only specific rules (optional — omit to run all):
+    rules:
+      - aws-access-key-id
+      - github-token
+      - private-key
+
+    # Or exclude noisy rules while keeping everything else:
+    # exclude_rules:
+    #   - generic-secret-assignment
+```
+
+> `generic-secret-assignment` has a higher false-positive rate than the other rules (it matches any quoted value ≥16 chars after a secret-like key name). Consider excluding it if you have many config files with long non-secret values, or tuning with `rules` to enable only the patterns relevant to your stack.
 
 ## Output Formats
 

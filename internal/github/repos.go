@@ -190,6 +190,19 @@ func ListCollaborators(ctx context.Context, client *github.Client, owner, repo, 
 	return all, 0, nil
 }
 
+// GetBranchHEAD returns the SHA of the HEAD commit on the given branch.
+// Returns an empty string (no error) when the branch or repository does not exist.
+func GetBranchHEAD(ctx context.Context, client *github.Client, owner, repo, branch string) (string, error) {
+	ref, resp, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+branch)
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return "", nil
+		}
+		return "", fmt.Errorf("fetching HEAD for %s/%s@%s: %w", owner, repo, branch, err)
+	}
+	return ref.GetObject().GetSHA(), nil
+}
+
 // waitForRateLimit checks if err is a rate limit error and, if so, blocks until
 // the reset time (plus one second) or the context is cancelled.
 // Returns true if the caller should retry, false otherwise.
