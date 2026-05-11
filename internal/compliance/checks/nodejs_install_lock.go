@@ -12,6 +12,7 @@ import (
 	"github.com/google/go-github/v84/github"
 )
 
+
 // npmInstallPattern matches `npm install` but not `pnpm install` (word boundary
 // before `npm` prevents matching inside `pnpm`).
 var npmInstallPattern = regexp.MustCompile(`\bnpm\s+install(?:\s|$)`)
@@ -43,19 +44,19 @@ func (c *nodejsInstallLockChecker) ID() string { return "npm-ci-required" }
 func (c *nodejsInstallLockChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
 	ref := repo.DefaultBranch
 
-	_, dirContent, resp, err := client.Repositories.GetContents(ctx, repo.Owner, repo.Name, ".github/workflows", &github.RepositoryContentGetOptions{Ref: ref})
+	dirContent, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, ".github/workflows", ref)
 	if err != nil {
-		if resp != nil && resp.StatusCode == 404 {
-			return &compliance.Result{
-				RuleID:   rule.ID,
-				RuleName: rule.Name,
-				Repo:     repo.FullName,
-				Status:   compliance.StatusSkip,
-				Severity: rule.Severity,
-				Message:  "no .github/workflows directory",
-			}, nil
-		}
 		return nil, fmt.Errorf("listing workflows for %s: %w", repo.FullName, err)
+	}
+	if dirContent == nil {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusSkip,
+			Severity: rule.Severity,
+			Message:  "no .github/workflows directory",
+		}, nil
 	}
 
 	var violations []string
@@ -66,7 +67,7 @@ func (c *nodejsInstallLockChecker) Check(ctx context.Context, client *github.Cli
 			continue
 		}
 
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, entry.GetPath(), ref)
+		content, err := gh.CachedFetchFileContent(ctx, client, repo.Owner, repo.Name, entry.GetPath(), ref)
 		if err != nil {
 			return nil, err
 		}

@@ -14,9 +14,10 @@ import (
 
 // defaultConcurrency is the number of concurrent (rule, repo) checks.
 // GitHub's secondary rate limit is ~900 requests/minute (15 req/sec) per
-// installation. 5 workers stays safely under that ceiling even when every
-// request completes instantly, while still providing meaningful parallelism.
-const defaultConcurrency = 5
+// installation. 10 workers provides meaningful parallelism while staying well
+// under that ceiling — most checks involve 1-3 API calls with non-trivial
+// network latency, so actual throughput is well below the burst limit.
+const defaultConcurrency = 10
 
 // Engine orchestrates compliance checks across repositories.
 type Engine struct {
@@ -107,6 +108,13 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 
 	outCh := make(chan checkOutcome, len(jobs))
 
+	// Build a per-repo cache so all checkers for the same repo share directory
+	// listings and file fetches without redundant API calls.
+	repoCaches := make(map[string]*gh.RepoCache, len(repos))
+	for _, r := range repos {
+		repoCaches[r.FullName] = &gh.RepoCache{}
+	}
+
 	workers := min(e.concurrency, len(jobs))
 
 	var wg sync.WaitGroup
@@ -116,7 +124,8 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 			defer wg.Done()
 			for job := range jobCh {
 				e.logger.Info("checking", "rule", job.rule.ID, "repo", job.repo.FullName)
-				result, err := job.checker.Check(ctx, e.client, job.repo, job.rule)
+				jobCtx := gh.WithCache(ctx, repoCaches[job.repo.FullName])
+				result, err := job.checker.Check(jobCtx, e.client, job.repo, job.rule)
 				outCh <- checkOutcome{result: result, err: err}
 			}
 		}()

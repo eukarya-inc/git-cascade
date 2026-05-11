@@ -30,7 +30,7 @@ func (c *noEnvFilesChecker) Check(ctx context.Context, client *github.Client, re
 	ref := repo.DefaultBranch
 
 	// Scan the root directory listing to detect any .env* files.
-	dirContent, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
+	dirContent, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
 	if err != nil {
 		return nil, err
 	}

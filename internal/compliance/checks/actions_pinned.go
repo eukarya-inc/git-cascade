@@ -27,7 +27,7 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 	ref := repo.DefaultBranch
 
 	// List workflow files
-	dirContent, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, ".github/workflows", ref)
+	dirContent, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, ".github/workflows", ref)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 			continue
 		}
 
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, entry.GetPath(), ref)
+		content, err := gh.CachedFetchFileContent(ctx, client, repo.Owner, repo.Name, entry.GetPath(), ref)
 		if err != nil {
 			return nil, err
 		}

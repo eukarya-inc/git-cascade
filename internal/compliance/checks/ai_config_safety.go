@@ -71,7 +71,7 @@ func (c *aiConfigSafetyChecker) Check(ctx context.Context, client *github.Client
 
 // checkAIConfigDir lists a directory and checks each JSON file inside it.
 func checkAIConfigDir(ctx context.Context, client *github.Client, repo gh.Repository, ref, dirPath string) ([]string, error) {
-	entries, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, dirPath, ref)
+	entries, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, dirPath, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func checkAIConfigDir(ctx context.Context, client *github.Client, repo gh.Reposi
 
 // checkAIConfigFile fetches a JSON file and looks for executable hook definitions.
 func checkAIConfigFile(ctx context.Context, client *github.Client, repo gh.Repository, ref, path string) ([]string, error) {
-	content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
+	content, err := gh.CachedFetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
 	if err != nil {
 		return nil, err
 	}

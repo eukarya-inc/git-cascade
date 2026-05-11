@@ -37,7 +37,7 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 	copy(searchPaths, dockerfilePaths)
 
 	// Check root directory for Dockerfile* files
-	dirContent, err := gh.ListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
+	dirContent, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 	found := false
 
 	for _, path := range searchPaths {
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
+		content, err := gh.CachedFetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
 		if err != nil {
 			return nil, err
 		}

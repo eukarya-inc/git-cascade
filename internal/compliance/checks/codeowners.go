@@ -22,21 +22,19 @@ func (c *codeownersChecker) Check(ctx context.Context, client *github.Client, re
 		"docs/CODEOWNERS",
 	}
 
-	for _, path := range paths {
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
-		if err != nil {
-			return nil, err
-		}
-		if content != nil {
-			return &compliance.Result{
-				RuleID:   rule.ID,
-				RuleName: rule.Name,
-				Repo:     repo.FullName,
-				Status:   compliance.StatusPass,
-				Severity: rule.Severity,
-				Message:  fmt.Sprintf("CODEOWNERS found at %s", path),
-			}, nil
-		}
+	foundPath, err := fetchFirstExisting(ctx, client, repo.Owner, repo.Name, ref, paths)
+	if err != nil {
+		return nil, err
+	}
+	if foundPath != "" {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusPass,
+			Severity: rule.Severity,
+			Message:  fmt.Sprintf("CODEOWNERS found at %s", foundPath),
+		}, nil
 	}
 
 	return &compliance.Result{

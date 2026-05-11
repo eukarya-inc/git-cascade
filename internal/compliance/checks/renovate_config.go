@@ -33,7 +33,7 @@ func (c *renovateConfigChecker) Check(ctx context.Context, client *github.Client
 		requiredDays = defaultMinStabilityDays
 	}
 
-	// Check common renovate config locations
+	// Check common renovate config locations in parallel.
 	configPaths := []string{
 		"renovate.json",
 		"renovate.json5",
@@ -43,17 +43,16 @@ func (c *renovateConfigChecker) Check(ctx context.Context, client *github.Client
 		".renovaterc.json",
 	}
 
+	foundPath, err := fetchFirstExisting(ctx, client, repo.Owner, repo.Name, ref, configPaths)
+	if err != nil {
+		return nil, err
+	}
+
 	var content []byte
-	var foundPath string
-	for _, path := range configPaths {
-		c, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
+	if foundPath != "" {
+		content, err = gh.CachedFetchFileContent(ctx, client, repo.Owner, repo.Name, foundPath, ref)
 		if err != nil {
 			return nil, err
-		}
-		if c != nil {
-			content = c
-			foundPath = path
-			break
 		}
 	}
 

@@ -22,21 +22,19 @@ func (c *fileExistsChecker) ID() string { return c.id }
 func (c *fileExistsChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
 	ref := repo.DefaultBranch
 
-	for _, path := range c.files {
-		content, err := gh.FetchFileContent(ctx, client, repo.Owner, repo.Name, path, ref)
-		if err != nil {
-			return nil, err
-		}
-		if content != nil {
-			return &compliance.Result{
-				RuleID:   rule.ID,
-				RuleName: rule.Name,
-				Repo:     repo.FullName,
-				Status:   compliance.StatusPass,
-				Severity: rule.Severity,
-				Message:  fmt.Sprintf("found %s", path),
-			}, nil
-		}
+	foundPath, err := fetchFirstExisting(ctx, client, repo.Owner, repo.Name, ref, c.files)
+	if err != nil {
+		return nil, err
+	}
+	if foundPath != "" {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   compliance.StatusPass,
+			Severity: rule.Severity,
+			Message:  fmt.Sprintf("found %s", foundPath),
+		}, nil
 	}
 
 	return &compliance.Result{
