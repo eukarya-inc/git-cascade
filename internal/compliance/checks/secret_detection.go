@@ -243,7 +243,7 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 			Repo:     repo.FullName,
 			Status:   compliance.StatusFail,
 			Severity: rule.Severity,
-			Message:  fmt.Sprintf("%d potential secret(s) detected: %s", len(violations), strings.Join(violations, "; ")),
+			Message:  fmt.Sprintf("%d potential secret(s) detected:\n%s", len(violations), strings.Join(violations, "\n")),
 		}, nil
 	}
 
@@ -351,15 +351,17 @@ func (c *secretDetectionChecker) tryReadArchive(ctx context.Context, archiveURL 
 			if sr.fileFilter != nil && !sr.fileFilter.MatchString(filePath) {
 				continue
 			}
-			matches := sr.pattern.FindAllString(text, -1)
-			for _, m := range matches {
+			locs := sr.pattern.FindAllStringIndex(text, -1)
+			for _, loc := range locs {
+				m := text[loc[0]:loc[1]]
 				if isPlaceholder(m) {
 					continue
 				}
 				if sr.ignore != nil && sr.ignore(m) {
 					continue
 				}
-				violations = append(violations, fmt.Sprintf("%s (%s)", filePath, sr.id))
+				lineNum := strings.Count(text[:loc[0]], "\n") + 1
+				violations = append(violations, fmt.Sprintf("- %s:%d (%s)", filePath, lineNum, sr.id))
 				break // one violation per rule per file is enough
 			}
 		}

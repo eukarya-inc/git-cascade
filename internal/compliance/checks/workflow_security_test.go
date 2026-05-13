@@ -79,13 +79,13 @@ on:
 	}
 }
 
-// — hasSecretsInherit —————————————————————————————————————————————————————————
+// — secretsInheritLines ———————————————————————————————————————————————————————
 
-func TestHasSecretsInherit(t *testing.T) {
+func TestSecretsInheritLines(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
-		want    bool
+		want    []int
 	}{
 		{
 			name: "secrets inherit in reusable workflow call",
@@ -95,7 +95,7 @@ jobs:
     uses: org/repo/.github/workflows/reusable.yml@main
     secrets: inherit
 `,
-			want: true,
+			want: []int{5},
 		},
 		{
 			name: "explicit secrets mapping is fine",
@@ -106,7 +106,7 @@ jobs:
     secrets:
       MY_TOKEN: ${{ secrets.MY_TOKEN }}
 `,
-			want: false,
+			want: nil,
 		},
 		{
 			name: "no secrets block at all",
@@ -117,7 +117,7 @@ jobs:
     steps:
       - uses: actions/checkout@abc123def456abc123def456abc123def456abc1
 `,
-			want: false,
+			want: nil,
 		},
 		{
 			name: "secrets inherit in comment should not match",
@@ -129,7 +129,7 @@ jobs:
 `,
 			// "# do not use secrets: inherit" — trimmed is "# do not use secrets: inherit"
 			// which does not equal "secrets: inherit"
-			want: false,
+			want: nil,
 		},
 		{
 			name: "indented secrets inherit",
@@ -139,15 +139,34 @@ jobs:
     uses: org/repo/.github/workflows/reusable.yml@main
       secrets: inherit
 `,
-			want: true,
+			want: []int{5},
+		},
+		{
+			name: "multiple secrets inherit occurrences",
+			content: `
+jobs:
+  call1:
+    uses: org/repo/.github/workflows/a.yml@main
+    secrets: inherit
+  call2:
+    uses: org/repo/.github/workflows/b.yml@main
+    secrets: inherit
+`,
+			want: []int{5, 8},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := hasSecretsInherit(tt.content)
-			if got != tt.want {
-				t.Errorf("hasSecretsInherit() = %v, want %v\ncontent:\n%s", got, tt.want, tt.content)
+			got := secretsInheritLines(tt.content)
+			if len(got) != len(tt.want) {
+				t.Errorf("secretsInheritLines() = %v, want %v\ncontent:\n%s", got, tt.want, tt.content)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("secretsInheritLines()[%d] = %d, want %d\ncontent:\n%s", i, got[i], tt.want[i], tt.content)
+				}
 			}
 		})
 	}
