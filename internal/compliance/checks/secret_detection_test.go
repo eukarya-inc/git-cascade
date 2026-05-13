@@ -42,8 +42,49 @@ func TestSecretDetection_AWSAccessKeyID_Fail(t *testing.T) {
 	if result.Status != compliance.StatusFail {
 		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
 	}
-	if result.Message == "" {
-		t.Error("expected non-empty violation message")
+	want := "1 potential secret(s) detected:\n- config.env:1 (aws-access-key-id)"
+	if result.Message != want {
+		t.Errorf("message format mismatch\ngot:  %q\nwant: %q", result.Message, want)
+	}
+}
+
+func TestSecretDetection_MessageFormat_LineNumber(t *testing.T) {
+	// Secret on line 3; verify the message includes the correct line number.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{".env"})
+	fake.setFile(testOwner, testRepo, ".env", []byte("FOO=bar\nBAZ=qux\nGITHUB_TOKEN=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789012\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
+	}
+	want := "1 potential secret(s) detected:\n- .env:3 (github-token)"
+	if result.Message != want {
+		t.Errorf("message format mismatch\ngot:  %q\nwant: %q", result.Message, want)
+	}
+}
+
+func TestSecretDetection_MessageFormat_MultipleViolations(t *testing.T) {
+	// Two files with secrets; verify newline-separated list with - prefix.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"a.env", "b.env"})
+	fake.setFile(testOwner, testRepo, "a.env", []byte("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"))
+	fake.setFile(testOwner, testRepo, "b.env", []byte("line1\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
+	}
+	if !strings.HasPrefix(result.Message, "2 potential secret(s) detected:\n") {
+		t.Errorf("expected message to start with count header, got: %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "- a.env:1 (aws-access-key-id)") {
+		t.Errorf("expected a.env:1 violation in message, got: %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "- b.env:2 (aws-access-key-id)") {
+		t.Errorf("expected b.env:2 violation in message, got: %q", result.Message)
 	}
 }
 

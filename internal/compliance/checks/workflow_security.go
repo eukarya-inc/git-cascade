@@ -132,8 +132,8 @@ func (c *secretsInheritChecker) Check(ctx context.Context, client *github.Client
 		if content == nil {
 			continue
 		}
-		if hasSecretsInherit(string(content)) {
-			violations = append(violations, name)
+		for _, lineNum := range secretsInheritLines(string(content)) {
+			violations = append(violations, fmt.Sprintf("- %s:%d", name, lineNum))
 		}
 	}
 
@@ -144,7 +144,7 @@ func (c *secretsInheritChecker) Check(ctx context.Context, client *github.Client
 			Repo:     repo.FullName,
 			Status:   compliance.StatusFail,
 			Severity: rule.Severity,
-			Message:  fmt.Sprintf("secrets: inherit used in: %s", strings.Join(violations, ", ")),
+			Message:  fmt.Sprintf("secrets: inherit found:\n%s", strings.Join(violations, "\n")),
 		}, nil
 	}
 
@@ -158,16 +158,16 @@ func (c *secretsInheritChecker) Check(ctx context.Context, client *github.Client
 	}, nil
 }
 
-// hasSecretsInherit reports whether workflow YAML content contains a
-// `secrets: inherit` directive in a job's `uses:` call.
-func hasSecretsInherit(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "secrets: inherit" {
-			return true
+// secretsInheritLines returns the 1-based line numbers where `secrets: inherit`
+// appears in workflow YAML content.
+func secretsInheritLines(content string) []int {
+	var lines []int
+	for i, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == "secrets: inherit" {
+			lines = append(lines, i+1)
 		}
 	}
-	return false
+	return lines
 }
 
 func init() {
