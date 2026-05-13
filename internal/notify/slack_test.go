@@ -154,7 +154,7 @@ func TestPostSlack_NoCredentials(t *testing.T) {
 	t.Setenv("GIT_CASCADE_SLACK_WEBHOOK", "")
 	t.Setenv("GIT_CASCADE_SLACK_BOT_TOKEN", "")
 	cfg := config.SlackConfig{}
-	err := PostSlack(cfg, "myorg", nil, "", config.Scope{})
+	err := PostSlack(cfg, "myorg", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "credentials not set") {
 		t.Errorf("expected credentials error, got %v", err)
 	}
@@ -174,7 +174,7 @@ func TestPostSlack_WebhookSuccess(t *testing.T) {
 		{Repo: "org/api", Status: compliance.StatusPass, Severity: config.SeverityWarning, Message: "ok"},
 	}
 	cfg := config.SlackConfig{WebhookURL: srv.URL}
-	if err := PostSlack(cfg, "myorg", results, "", config.Scope{}); err != nil {
+	if err := PostSlack(cfg, "myorg", results, ""); err != nil {
 		t.Fatalf("PostSlack: %v", err)
 	}
 	if received.Text == "" {
@@ -195,7 +195,7 @@ func TestPostSlack_WithResultsURL(t *testing.T) {
 	defer srv.Close()
 
 	cfg := config.SlackConfig{WebhookURL: srv.URL}
-	if err := PostSlack(cfg, "myorg", nil, "https://ci.example.com/run/1", config.Scope{}); err != nil {
+	if err := PostSlack(cfg, "myorg", nil, "https://ci.example.com/run/1"); err != nil {
 		t.Fatalf("PostSlack: %v", err)
 	}
 	found := false
@@ -220,7 +220,7 @@ func TestPostSlack_ResultsURLFromEnv(t *testing.T) {
 	defer srv.Close()
 
 	cfg := config.SlackConfig{WebhookURL: srv.URL}
-	if err := PostSlack(cfg, "myorg", nil, "", config.Scope{}); err != nil {
+	if err := PostSlack(cfg, "myorg", nil, ""); err != nil {
 		t.Fatalf("PostSlack: %v", err)
 	}
 	found := false
@@ -242,7 +242,7 @@ func TestPostSlack_WebhookFromEnv(t *testing.T) {
 	t.Setenv("GIT_CASCADE_SLACK_WEBHOOK", srv.URL)
 
 	cfg := config.SlackConfig{} // no WebhookURL set
-	if err := PostSlack(cfg, "myorg", nil, "", config.Scope{}); err != nil {
+	if err := PostSlack(cfg, "myorg", nil, ""); err != nil {
 		t.Fatalf("PostSlack with env webhook: %v", err)
 	}
 }
@@ -254,7 +254,7 @@ func TestPostSlack_Non200Response(t *testing.T) {
 	defer srv.Close()
 
 	cfg := config.SlackConfig{WebhookURL: srv.URL}
-	err := PostSlack(cfg, "myorg", nil, "", config.Scope{})
+	err := PostSlack(cfg, "myorg", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "status 500") {
 		t.Errorf("expected status 500 error, got %v", err)
 	}
@@ -270,7 +270,7 @@ func TestPostSlack_WithChannel(t *testing.T) {
 	defer srv.Close()
 
 	cfg := config.SlackConfig{WebhookURL: srv.URL, Channel: "#compliance"}
-	PostSlack(cfg, "myorg", nil, "", config.Scope{})
+	PostSlack(cfg, "myorg", nil, "")
 	if received.Channel != "#compliance" {
 		t.Errorf("expected channel=#compliance, got %q", received.Channel)
 	}
@@ -289,7 +289,7 @@ func TestPostSlack_SingleRepo(t *testing.T) {
 		{Repo: "org/api", Status: compliance.StatusPass, Severity: config.SeverityWarning},
 	}
 	cfg := config.SlackConfig{WebhookURL: srv.URL}
-	PostSlack(cfg, "myorg", results, "", config.Scope{})
+	PostSlack(cfg, "myorg", results, "")
 
 	found := false
 	for _, b := range received.Blocks {
@@ -315,7 +315,7 @@ func TestPostSlack_BotToken_NoChannel(t *testing.T) {
 
 	// Bot token set but no channel → error.
 	cfg := config.SlackConfig{BotToken: "xoxb-fake"}
-	err := PostSlack(cfg, "myorg", nil, "", config.Scope{})
+	err := PostSlack(cfg, "myorg", nil, "")
 	if err == nil || !strings.Contains(err.Error(), "no channel set") {
 		t.Errorf("expected 'no channel set' error, got %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPostSlack_BotToken_DefaultChannel(t *testing.T) {
 	// We do this by setting the bot token and a webhook URL that is unused,
 	// but we need to swap the constant — instead test via env-resolved token
 	// by calling postSlackSummary directly with our server URL.
-	if err := postSlackSummary(srv.URL, "xoxb-fake", "#general", "myorg", nil, "", config.Scope{}, false); err != nil {
+	if err := postSlackSummary(srv.URL, "xoxb-fake", "#general", "myorg", nil, "", false); err != nil {
 		t.Fatalf("postSlackSummary: %v", err)
 	}
 	if !strings.HasPrefix(authHeader, "Bearer ") {
@@ -357,7 +357,7 @@ func TestPostSlack_BotToken_APIError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := postSlackSummary(srv.URL, "xoxb-fake", "#missing", "myorg", nil, "", config.Scope{}, false)
+	err := postSlackSummary(srv.URL, "xoxb-fake", "#missing", "myorg", nil, "", false)
 	if err == nil || !strings.Contains(err.Error(), "channel_not_found") {
 		t.Errorf("expected channel_not_found error, got %v", err)
 	}
@@ -380,7 +380,7 @@ func TestPostSlack_BotTokenFromEnv(t *testing.T) {
 	if token == "" {
 		token = "xoxb-from-env"
 	}
-	if err := postSlackSummary(srv.URL, token, cfg.Channel, "myorg", nil, "", config.Scope{}, false); err != nil {
+	if err := postSlackSummary(srv.URL, token, cfg.Channel, "myorg", nil, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -422,7 +422,7 @@ func TestPostSlack_RepositoryChannels_Routing(t *testing.T) {
 	// Call postSlackViaBot with the test server URL injected via a wrapper.
 	// Since we can't override slackAPIPostMessage constant in tests, call the
 	// internal fanout logic by substituting the URL.
-	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "", config.Scope{}); err != nil {
+	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, ""); err != nil {
 		t.Fatalf("postSlackViaBotURL: %v", err)
 	}
 
@@ -464,7 +464,7 @@ func TestPostSlack_RepositoryChannels_NoFallbackForUnmapped(t *testing.T) {
 		},
 	}
 
-	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "", config.Scope{}); err != nil {
+	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if callCount != 1 {
@@ -495,7 +495,7 @@ func TestPostSlack_RepositoryChannels_ShortNameMatch(t *testing.T) {
 		},
 	}
 
-	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "", config.Scope{}); err != nil {
+	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if received.Channel != "#backend" {
@@ -529,7 +529,7 @@ func TestPostSlack_RepositoryChannels_ManyToMany(t *testing.T) {
 		},
 	}
 
-	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "", config.Scope{}); err != nil {
+	if err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if callCount != 2 {

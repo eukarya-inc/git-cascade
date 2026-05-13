@@ -52,7 +52,7 @@ type slackAPIResponse struct {
 //
 // resultsURL is an optional run URL linked in the notification; supply an empty
 // string to omit it.
-func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string, scope config.Scope) error {
+func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string) error {
 	botToken := cfg.BotToken
 	if botToken == "" {
 		botToken = os.Getenv("GIT_CASCADE_SLACK_BOT_TOKEN")
@@ -72,20 +72,20 @@ func PostSlack(cfg config.SlackConfig, org string, results []compliance.Result, 
 	}
 
 	if botToken != "" {
-		return postSlackViaBot(cfg, org, results, resultsURL, scope)
+		return postSlackViaBot(cfg, org, results, resultsURL)
 	}
 	// Webhook path: single summary, no per-repo routing.
-	return postSlackSummary(webhookURL, "", cfg.Channel, org, results, resultsURL, scope, false)
+	return postSlackSummary(webhookURL, "", cfg.Channel, org, results, resultsURL, false)
 }
 
 // postSlackViaBot fans results out to per-channel payloads using the Slack Web API.
-func postSlackViaBot(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string, scope config.Scope) error {
-	return postSlackViaBotURL(slackAPIPostMessage, cfg, org, results, resultsURL, scope)
+func postSlackViaBot(cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string) error {
+	return postSlackViaBotURL(slackAPIPostMessage, cfg, org, results, resultsURL)
 }
 
 // postSlackViaBotURL is the testable core of postSlackViaBot; apiURL can be
 // overridden in tests to point at a local httptest server.
-func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string, scope config.Scope) error {
+func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, results []compliance.Result, resultsURL string) error {
 	botToken := cfg.BotToken
 	if botToken == "" {
 		botToken = os.Getenv("GIT_CASCADE_SLACK_BOT_TOKEN")
@@ -96,7 +96,7 @@ func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, resul
 		if cfg.Channel == "" {
 			return fmt.Errorf("slack bot token configured but no channel set (set notify.slack.channel or add repository_channels)")
 		}
-		return postSlackSummary(apiURL, botToken, cfg.Channel, org, results, resultsURL, scope, false)
+		return postSlackSummary(apiURL, botToken, cfg.Channel, org, results, resultsURL, false)
 	}
 
 	repoChannels := buildRepoChannelIndex(cfg.RepositoryChannels)
@@ -120,14 +120,14 @@ func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, resul
 	}
 
 	for ch, chResults := range channelResults {
-		if err := postSlackSummary(apiURL, botToken, ch, org, chResults, resultsURL, scope, true); err != nil {
+		if err := postSlackSummary(apiURL, botToken, ch, org, chResults, resultsURL, true); err != nil {
 			return err
 		}
 	}
 
 	// Unmapped repos fall back to the default channel — summary only, no repo list.
 	if len(unmapped) > 0 && cfg.Channel != "" {
-		if err := postSlackSummary(apiURL, botToken, cfg.Channel, org, unmapped, resultsURL, scope, false); err != nil {
+		if err := postSlackSummary(apiURL, botToken, cfg.Channel, org, unmapped, resultsURL, false); err != nil {
 			return err
 		}
 	}
@@ -151,7 +151,7 @@ func buildRepoChannelIndex(mappings []config.RepositoryChannelMapping) map[strin
 // postSlackSummary sends a single summary payload.
 // When token is non-empty the request is sent as a bot via the Web API (Bearer
 // auth); otherwise it is sent as an Incoming Webhook POST with no auth header.
-func postSlackSummary(url, token, channel, org string, results []compliance.Result, resultsURL string, scope config.Scope, listRepos bool) error {
+func postSlackSummary(url, token, channel, org string, results []compliance.Result, resultsURL string, listRepos bool) error {
 	passes, warnings, errors := countResults(results)
 	total := len(results)
 
@@ -184,7 +184,6 @@ func postSlackSummary(url, token, channel, org string, results []compliance.Resu
 	if resultsURL != "" {
 		summaryText += fmt.Sprintf("\n<%s|View compliance report>", resultsURL)
 	}
-	summaryText += fmt.Sprintf("\n_Scope: %s_", scopeSummary(scope))
 
 	blocks := []slackBlock{
 		{Type: "header", Text: &slackText{Type: "plain_text", Text: fmt.Sprintf("git-cascade: %s", org)}},

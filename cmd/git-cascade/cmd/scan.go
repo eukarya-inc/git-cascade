@@ -299,7 +299,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	if slackCfg.Enabled || slackCfg.WebhookURL != "" || slackCfg.BotToken != "" {
 		logger.Info("sending slack notification")
-		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL, cfg.Scope); err != nil {
+		if err := notify.PostSlack(slackCfg, scanFlags.org, results, resultsURL); err != nil {
 			return fmt.Errorf("slack notification: %w", err)
 		}
 	}
