@@ -144,7 +144,7 @@ func (c *secretsInheritChecker) Check(ctx context.Context, client *github.Client
 			Repo:     repo.FullName,
 			Status:   compliance.StatusFail,
 			Severity: rule.Severity,
-			Message:  fmt.Sprintf("secrets: inherit found:\n%s", strings.Join(violations, "\n")),
+			Message:  fmt.Sprintf("secrets: inherit found: %s", strings.Join(violations, "; ")),
 		}, nil
 	}
 

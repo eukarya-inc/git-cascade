@@ -42,7 +42,7 @@ func TestSecretDetection_AWSAccessKeyID_Fail(t *testing.T) {
 	if result.Status != compliance.StatusFail {
 		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
 	}
-	want := "1 potential secret(s) detected:\n- config.env:1 (aws-access-key-id)"
+	want := "1 potential secret(s) detected: - config.env:1 (aws-access-key-id)"
 	if result.Message != want {
 		t.Errorf("message format mismatch\ngot:  %q\nwant: %q", result.Message, want)
 	}
@@ -59,7 +59,7 @@ func TestSecretDetection_MessageFormat_LineNumber(t *testing.T) {
 	if result.Status != compliance.StatusFail {
 		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
 	}
-	want := "1 potential secret(s) detected:\n- .env:3 (github-token)"
+	want := "1 potential secret(s) detected: - .env:3 (github-token)"
 	if result.Message != want {
 		t.Errorf("message format mismatch\ngot:  %q\nwant: %q", result.Message, want)
 	}
@@ -77,7 +77,7 @@ func TestSecretDetection_MessageFormat_MultipleViolations(t *testing.T) {
 	if result.Status != compliance.StatusFail {
 		t.Errorf("expected fail, got %s: %s", result.Status, result.Message)
 	}
-	if !strings.HasPrefix(result.Message, "2 potential secret(s) detected:\n") {
+	if !strings.HasPrefix(result.Message, "2 potential secret(s) detected: ") {
 		t.Errorf("expected message to start with count header, got: %q", result.Message)
 	}
 	if !strings.Contains(result.Message, "- a.env:1 (aws-access-key-id)") {

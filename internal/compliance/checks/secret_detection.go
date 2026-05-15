@@ -243,7 +243,7 @@ func (c *secretDetectionChecker) Check(ctx context.Context, client *github.Clien
 			Repo:     repo.FullName,
 			Status:   compliance.StatusFail,
 			Severity: rule.Severity,
-			Message:  fmt.Sprintf("%d potential secret(s) detected:\n%s", len(violations), strings.Join(violations, "\n")),
+			Message:  fmt.Sprintf("%d potential secret(s) detected: %s", len(violations), strings.Join(violations, "; ")),
 		}, nil
 	}
 
