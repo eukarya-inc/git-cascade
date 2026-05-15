@@ -7,12 +7,12 @@ scope:
   include_forked: false
   # include_repos restricts the scan to only these repos; overrides all other scope filters.
   # Exact names and glob patterns are both supported.
-  # include_repos:
-  #   - api
+  include_repos:
+    - api
   #   - web-*
-  exclude_repos:         # Glob patterns supported
-    - sandbox
-    - legacy-*
+  # exclude_repos:         # Glob patterns supported
+  #   - sandbox
+  #   - legacy-*
 
 # include_rules restricts the scan to rules whose IDs match at least one glob pattern.
 # When set, exclude_rules is ignored.
