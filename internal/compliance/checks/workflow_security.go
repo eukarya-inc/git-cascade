@@ -75,16 +75,16 @@ func (c *pullRequestTargetChecker) Check(ctx context.Context, client *github.Cli
 }
 
 // hasPullRequestTarget reports whether workflow YAML content uses the
-// pull_request_target event trigger.
+// pull_request_target event trigger on a line that is not suppressed with
+// a git-cascade:allow comment.
 func hasPullRequestTarget(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Map key:  "pull_request_target:" or "pull_request_target: ..."
-		if trimmed == "pull_request_target:" || strings.HasPrefix(trimmed, "pull_request_target:") {
-			return true
-		}
-		// List item: "- pull_request_target"
-		if trimmed == "- pull_request_target" {
+		matched := trimmed == "pull_request_target:" ||
+			strings.HasPrefix(trimmed, "pull_request_target:") ||
+			trimmed == "- pull_request_target"
+		if matched && !hasAllowComment(lines, i) {
 			return true
 		}
 	}
@@ -159,11 +159,13 @@ func (c *secretsInheritChecker) Check(ctx context.Context, client *github.Client
 }
 
 // secretsInheritLines returns the 1-based line numbers where `secrets: inherit`
-// appears in workflow YAML content.
+// appears in workflow YAML content, excluding lines suppressed with a
+// git-cascade:allow comment.
 func secretsInheritLines(content string) []int {
+	split := strings.Split(content, "\n")
 	var lines []int
-	for i, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == "secrets: inherit" {
+	for i, line := range split {
+		if strings.TrimSpace(line) == "secrets: inherit" && !hasAllowComment(split, i) {
 			lines = append(lines, i+1)
 		}
 	}

@@ -71,10 +71,14 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 		}
 		found = true
 
-		matches := fromLine.FindAllStringSubmatch(string(content), -1)
-		for _, m := range matches {
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			m := fromLine.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
 			image := m[1]
-			// Skip build stage aliases (FROM build AS ...) and scratch
+			// Skip build stage aliases (FROM scratch) and scratch
 			if strings.EqualFold(image, "scratch") {
 				continue
 			}
@@ -82,9 +86,13 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 			if strings.Contains(image, "$") {
 				continue
 			}
-			if !sha256Digest.MatchString(image) {
-				violations = append(violations, fmt.Sprintf("%s: FROM %s", path, image))
+			if sha256Digest.MatchString(image) {
+				continue
 			}
+			if hasAllowComment(lines, i) {
+				continue
+			}
+			violations = append(violations, fmt.Sprintf("%s: FROM %s", path, image))
 		}
 	}
 

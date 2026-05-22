@@ -57,8 +57,12 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 			continue
 		}
 
-		matches := usesPattern.FindAllStringSubmatch(string(content), -1)
-		for _, m := range matches {
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			m := usesPattern.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
 			action := m[1]
 			actionRef := m[2]
 
@@ -70,10 +74,13 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 			if strings.HasPrefix(action, "docker://") {
 				continue
 			}
-
-			if !shaRef.MatchString(actionRef) {
-				violations = append(violations, fmt.Sprintf("%s: %s@%s", name, action, actionRef))
+			if shaRef.MatchString(actionRef) {
+				continue
 			}
+			if hasAllowComment(lines, i) {
+				continue
+			}
+			violations = append(violations, fmt.Sprintf("%s: %s@%s", name, action, actionRef))
 		}
 	}
 

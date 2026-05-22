@@ -351,6 +351,7 @@ func (c *secretDetectionChecker) tryReadArchive(ctx context.Context, archiveURL 
 			if sr.fileFilter != nil && !sr.fileFilter.MatchString(filePath) {
 				continue
 			}
+			lines := strings.Split(text, "\n")
 			locs := sr.pattern.FindAllStringIndex(text, -1)
 			for _, loc := range locs {
 				m := text[loc[0]:loc[1]]
@@ -361,6 +362,9 @@ func (c *secretDetectionChecker) tryReadArchive(ctx context.Context, archiveURL 
 					continue
 				}
 				lineNum := strings.Count(text[:loc[0]], "\n") + 1
+				if hasAllowComment(lines, lineNum-1) {
+					continue
+				}
 				violations = append(violations, fmt.Sprintf("- %s:%d (%s)", filePath, lineNum, sr.id))
 				break // one violation per rule per file is enough
 			}

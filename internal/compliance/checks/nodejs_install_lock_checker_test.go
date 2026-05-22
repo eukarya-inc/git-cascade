@@ -260,3 +260,27 @@ jobs:
 		t.Errorf("compliant file should not appear in failure message, got %q", result.Message)
 	}
 }
+
+func TestNodejsInstallLockChecker_AllowComment(t *testing.T) {
+	// An npm install line annotated with # git-cascade:allow must not produce a violation.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm install # git-cascade:allow
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
