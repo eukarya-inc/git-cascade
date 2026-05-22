@@ -682,6 +682,47 @@ func TestDockerfileDigestChecker_Unpinned(t *testing.T) {
 	}
 }
 
+func TestActionsPinnedChecker_AllowComment(t *testing.T) {
+	// A uses: line annotated with # git-cascade:allow must not produce a violation.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # git-cascade:allow
+`))
+	_, client := fake.serve(t)
+
+	c := &actionsPinnedChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestDockerfileDigestChecker_AllowComment(t *testing.T) {
+	// A FROM line annotated with # git-cascade:allow must not produce a violation.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", "", []string{"Dockerfile"})
+	fake.setFile("org", "repo", "Dockerfile", []byte("FROM ubuntu:22.04 # git-cascade:allow\n"))
+	_, client := fake.serve(t)
+
+	c := &dockerfileDigestChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("dockerfile-digest"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
 // ——— externalCollaboratorsChecker ————————————————————————————————————————————
 
 // externalCollaboratorsChecker calls gh.ListCollaborators which requires the
