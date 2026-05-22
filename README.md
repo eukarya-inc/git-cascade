@@ -474,6 +474,73 @@ Built-in detection rules:
 
 > `generic-secret-assignment` has a higher false-positive rate than the other rules (it matches any quoted value ≥16 chars after a secret-like key name). Consider excluding it if you have many config files with long non-secret values, or tuning with `rules` to enable only the patterns relevant to your stack.
 
+## Suppressing False Positives
+
+For checks that scan file content line by line, you can suppress an individual violation by adding a `git-cascade:allow` comment on the same line as the flagged value, or on the line immediately above it.
+
+The comment can use any of the following styles to cover common languages and file formats:
+
+| Comment style | Languages / formats |
+|---|---|
+| `# git-cascade:allow` | Shell, Python, Ruby, YAML, `.env`, HCL/Terraform, Dockerfile |
+| `// git-cascade:allow` | Go, JavaScript/TypeScript, Java, Rust, Swift, Kotlin, PHP, C/C++ |
+| `-- git-cascade:allow` | SQL, Lua, Haskell |
+| `<!-- git-cascade:allow` | HTML, XML |
+| `/* git-cascade:allow` | CSS, C block comment start |
+
+### Supported checks
+
+| Check | Where to place the comment |
+|---|---|
+| `secret-detection` | Same line as the secret, or the line above (useful for multi-line constructs like PEM headers) |
+| `no-secrets-inherit` | Same line as `secrets: inherit`, or the line above |
+| `no-pull-request-target` | Same line as the `pull_request_target:` trigger, or the line above |
+| `actions-pinned` | Same line as the `uses:` entry |
+| `dockerfile-digest` | Same line as the `FROM` instruction |
+| `npm-ci-required` | Same line as the `npm install` / `pnpm install` / `yarn` command |
+
+### Examples
+
+**.env file** — suppress a known non-secret value flagged by `secret-detection`:
+```bash
+# Intentional test fixture — not a real key
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE # git-cascade:allow
+```
+
+**PEM file** — preceding-line form for multi-line constructs:
+```
+# git-cascade:allow
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAK...
+```
+
+**Go source** — suppress a hardcoded value used only in tests:
+```go
+password = "supersecretpassword123456" // git-cascade:allow
+```
+
+**GitHub Actions workflow** — allow a trusted action pinned by tag instead of SHA:
+```yaml
+      - uses: actions/checkout@v4 # git-cascade:allow
+```
+
+**Dockerfile** — allow a base image that intentionally uses a tag:
+```dockerfile
+FROM node:20-alpine # git-cascade:allow
+```
+
+**Workflow** — allow `secrets: inherit` for an intentional internal reuse:
+```yaml
+    secrets: inherit # git-cascade:allow
+```
+
+**CI script in a workflow** — allow a one-off `npm install` step:
+```yaml
+      - run: npm install -g @myorg/cli # git-cascade:allow
+```
+
+> The suppression applies only to the annotated line in the annotated file. Other files or other lines in the same file are unaffected.
+
 ## Output Formats
 
 | Format | Flag | Description |

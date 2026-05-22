@@ -890,6 +890,102 @@ func TestStripArchivePrefix(t *testing.T) {
 	}
 }
 
+// ——— git-cascade:allow suppression comment ————————————————————————————————————
+
+func TestSecretDetection_AllowComment_HashInline(t *testing.T) {
+	// Shell/YAML/env: inline # git-cascade:allow suppresses the violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{".env"})
+	fake.setFile(testOwner, testRepo, ".env", []byte("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE # git-cascade:allow\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with # allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_SlashSlashInline(t *testing.T) {
+	// Go/JS/TS: inline // git-cascade:allow suppresses the violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"config.go"})
+	fake.setFile(testOwner, testRepo, "config.go", []byte(`password = "supersecretpassword123456" // git-cascade:allow`+"\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with // allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_SQLInline(t *testing.T) {
+	// SQL/Lua: inline -- git-cascade:allow suppresses the violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"seed.sql"})
+	fake.setFile(testOwner, testRepo, "seed.sql", []byte(`INSERT INTO cfg VALUES ('password', 'supersecretpassword123456'); -- git-cascade:allow`+"\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with -- allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_HTMLInline(t *testing.T) {
+	// HTML/XML: inline <!-- git-cascade:allow suppresses the violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"index.html"})
+	fake.setFile(testOwner, testRepo, "index.html", []byte(`<meta name="token" content="ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789012"> <!-- git-cascade:allow -->`+"\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with <!-- allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_CSSBlockInline(t *testing.T) {
+	// CSS: inline /* git-cascade:allow suppresses the violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"style.css"})
+	fake.setFile(testOwner, testRepo, "style.css", []byte(`content: "sk_live_4eC39HqLyjWDarjtT1zdp7dc"; /* git-cascade:allow */`+"\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with /* allow comment, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_PrecedingLine(t *testing.T) {
+	// A git-cascade:allow comment on the line above suppresses the match.
+	// Useful for multi-line constructs like PEM headers.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"test_cert.pem"})
+	fake.setFile(testOwner, testRepo, "test_cert.pem", []byte("# git-cascade:allow\n-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...\n-----END RSA PRIVATE KEY-----\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass with allow comment on preceding line, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestSecretDetection_AllowComment_OnlyOneLine_OtherFileFails(t *testing.T) {
+	// Allow comment suppresses only the annotated file; a second file without the
+	// comment still triggers a violation.
+	fake := newFakeGitHub()
+	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
+	fake.setGitTree(testOwner, testRepo, testSHA, []string{"allowed.env", "real.env"})
+	fake.setFile(testOwner, testRepo, "allowed.env", []byte("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE # git-cascade:allow\n"))
+	fake.setFile(testOwner, testRepo, "real.env", []byte("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"))
+
+	result := runSecretCheck(t, fake, baseRule("secret-detection"))
+	if result.Status != compliance.StatusFail {
+		t.Errorf("expected fail when non-annotated file has a secret, got %s: %s", result.Status, result.Message)
+	}
+}
+
 // ——— isPlaceholder exact-match branch ————————————————————————————————————————
 
 func TestIsPlaceholder_ExactMatch(t *testing.T) {

@@ -120,7 +120,11 @@ func (c *nodejsInstallLockChecker) Check(ctx context.Context, client *github.Cli
 // contains an install command that does not enforce the lockfile, or an empty
 // string if everything looks fine.
 func installViolation(content string) string {
-	for line := range strings.SplitSeq(content, "\n") {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if hasAllowComment(lines, i) {
+			continue
+		}
 		if hasNpmInstallViolation(line) {
 			return "npm install"
 		}
