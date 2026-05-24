@@ -86,7 +86,21 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 	// This means workers pick up different rules for the same repo in parallel
 	// rather than exhausting one rule across all repos before starting the next.
 	var jobs []checkJob
+	var emptyRepoResults []Result
 	for _, repo := range repos {
+		if repo.DefaultBranch == "" {
+			e.logger.Info("skipping empty repository", "repo", repo.FullName)
+			emptyRepoResults = append(emptyRepoResults, Result{
+				RuleID:   "empty-repository",
+				RuleName: "Empty Repository",
+				Repo:     repo.FullName,
+				Private:  repo.Private,
+				Status:   StatusFail,
+				Severity: config.SeverityWarning,
+				Message:  "⚠️ repository is empty (no commits)",
+			})
+			continue
+		}
 		for _, ar := range activeRules {
 			if !repoMatchesRuleScope(repo.Name, ar.rule.Scope) {
 				e.logger.Debug("skipping rule for repo due to rule scope", "rule", ar.rule.ID, "repo", repo.FullName)
@@ -97,7 +111,7 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 	}
 
 	if len(jobs) == 0 {
-		return nil, nil
+		return emptyRepoResults, nil
 	}
 
 	jobCh := make(chan checkJob, len(jobs))
@@ -144,7 +158,7 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 		repoPrivate[r.FullName] = r.Private
 	}
 
-	results := make([]Result, 0, len(jobs))
+	results := make([]Result, 0, len(jobs)+len(emptyRepoResults))
 	for outcome := range outCh {
 		if outcome.err != nil {
 			return nil, fmt.Errorf("compliance check failed: %w", outcome.err)
@@ -152,6 +166,7 @@ func (e *Engine) Run(ctx context.Context, repos []gh.Repository) ([]Result, erro
 		outcome.result.Private = repoPrivate[outcome.result.Repo]
 		results = append(results, *outcome.result)
 	}
+	results = append(results, emptyRepoResults...)
 
 	return results, nil
 }

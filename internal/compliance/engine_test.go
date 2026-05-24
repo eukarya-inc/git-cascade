@@ -348,6 +348,84 @@ func TestEngine_IncludeRulesTakesPrecedenceOverExclude(t *testing.T) {
 	}
 }
 
+func TestEngine_EmptyRepository_SkipsCheckers(t *testing.T) {
+	stub := &stubChecker{id: "empty-repo-rule"}
+	Register(stub)
+	defer delete(registry, "empty-repo-rule")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules:   []config.Rule{makeRule("empty-repo-rule", true)},
+	}
+	emptyRepo := gh.Repository{Owner: "org", Name: "empty", FullName: "org/empty", DefaultBranch: ""}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), []gh.Repository{emptyRepo})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stub.calls.Load() != 0 {
+		t.Error("checker should not be called for an empty repository")
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 synthetic result, got %d", len(results))
+	}
+	r := results[0]
+	if r.RuleID != "empty-repository" {
+		t.Errorf("expected rule_id empty-repository, got %q", r.RuleID)
+	}
+	if r.Status != StatusFail {
+		t.Errorf("expected StatusFail, got %s", r.Status)
+	}
+	if r.Severity != config.SeverityWarning {
+		t.Errorf("expected SeverityWarning, got %s", r.Severity)
+	}
+	if r.Repo != "org/empty" {
+		t.Errorf("expected repo org/empty, got %s", r.Repo)
+	}
+}
+
+func TestEngine_MixedEmptyAndNonEmpty(t *testing.T) {
+	stub := &stubChecker{id: "mixed-rule"}
+	Register(stub)
+	defer delete(registry, "mixed-rule")
+
+	cfg := &config.ComplianceConfig{
+		Version: "1",
+		Rules:   []config.Rule{makeRule("mixed-rule", true)},
+	}
+	repos := []gh.Repository{
+		makeRepo("normal"),
+		{Owner: "org", Name: "empty", FullName: "org/empty", DefaultBranch: ""},
+	}
+	engine := NewEngine(nil, cfg, noopLogger())
+	results, err := engine.Run(context.Background(), repos)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// normal repo gets 1 checker result; empty repo gets 1 synthetic result
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if stub.calls.Load() != 1 {
+		t.Errorf("checker should be called once (for normal repo only), got %d", stub.calls.Load())
+	}
+	var hasEmpty, hasNormal bool
+	for _, r := range results {
+		if r.RuleID == "empty-repository" && r.Repo == "org/empty" {
+			hasEmpty = true
+		}
+		if r.RuleID == "mixed-rule" && r.Repo == "org/normal" {
+			hasNormal = true
+		}
+	}
+	if !hasEmpty {
+		t.Error("expected synthetic empty-repository result for org/empty")
+	}
+	if !hasNormal {
+		t.Error("expected checker result for org/normal")
+	}
+}
+
 func TestEngine_WithConcurrency(t *testing.T) {
 	e := NewEngine(nil, &config.ComplianceConfig{Version: "1"}, noopLogger())
 	if e.concurrency != defaultConcurrency {
