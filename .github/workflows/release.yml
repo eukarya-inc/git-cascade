@@ -39,10 +39,30 @@ jobs:
         with:
           egress-policy: block
           allowed-endpoints: >
+            *.apple.com:443
+            0.pool.ntp.org:443
+            api.apple-cloudkit.com:443
             api.github.com:443
+            apps.mzstatic.com:443
+            configuration-row-lb.apple.com.akadns.net:443
+            gateway.icloud.com:443
             github.com:443
+            mask-api.icloud.com:443
+            mask.icloud.com:443
+            mesu-cdn.origin-apple.com.akadns.net:443
+            metrics.icloud.com:443
+            ocsp.digicert.com:80
             proxy.golang.org:443
             release-assets.githubusercontent.com:443
+            s.mzstatic.com:443
+            updates.cdn-apple.com:443
+            0.pool.ntp.org:123
+            apple-relay.cloudflare.com:443
+            apple-relay.fastly-edge.com:443
+            blob.bn9prdstrz04a.store.core.windows.net:443
+            c.apple.news:443
+            calendars.icloud.com:443
+            xp-cdn-lb.itunes-apple.com.akadns.net:443
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -89,9 +109,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            uploads.github.com:443
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -125,9 +149,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
 
       - name: Generate GitHub App token
         id: app-token
