@@ -358,8 +358,14 @@ func TestPostSlack_BotToken_APIError(t *testing.T) {
 	defer srv.Close()
 
 	err := postSlackSummary(srv.URL, "xoxb-fake", "#missing", "myorg", nil, "", false)
-	if err == nil || !strings.Contains(err.Error(), "channel_not_found") {
-		t.Errorf("expected channel_not_found error, got %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "channel_not_found") {
+		t.Errorf("expected channel_not_found in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "#missing") {
+		t.Errorf("expected channel name in error, got %v", err)
 	}
 }
 
@@ -537,5 +543,94 @@ func TestPostSlack_RepositoryChannels_ManyToMany(t *testing.T) {
 	}
 	if !channelsSeen["#ch1"] || !channelsSeen["#ch2"] {
 		t.Errorf("expected calls to #ch1 and #ch2, saw %v", channelsSeen)
+	}
+}
+
+func TestPostSlack_RepositoryChannels_FailedChannelDoesNotBlockOthers(t *testing.T) {
+	// One mapped channel returns channel_not_found; the other mapped channel and
+	// the default fallback channel must still receive their notifications.
+	channelsSeen := make(map[string]bool)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p slackPayload
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &p)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if p.Channel == "#bad-channel" {
+			w.Write([]byte(`{"ok":false,"error":"channel_not_found"}`))
+			return
+		}
+		channelsSeen[p.Channel] = true
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	results := []compliance.Result{
+		{Repo: "org/api",     Status: compliance.StatusFail, Severity: config.SeverityError},
+		{Repo: "org/web",     Status: compliance.StatusFail, Severity: config.SeverityWarning},
+		{Repo: "org/worker",  Status: compliance.StatusFail, Severity: config.SeverityWarning}, // unmapped → #default
+	}
+	cfg := config.SlackConfig{
+		BotToken: "xoxb-fake",
+		Channel:  "#default",
+		RepositoryChannels: []config.RepositoryChannelMapping{
+			{Channels: "#bad-channel", Repositories: "api"}, // will fail
+			{Channels: "#web",         Repositories: "web"}, // should succeed
+		},
+	}
+
+	err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "")
+	if err == nil {
+		t.Fatal("expected error for failed channel, got nil")
+	}
+	if !strings.Contains(err.Error(), "channel_not_found") {
+		t.Errorf("expected channel_not_found in error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "#bad-channel") {
+		t.Errorf("expected failing channel name in error, got %v", err)
+	}
+
+	// Despite the failure, other channels must have received their notifications.
+	if !channelsSeen["#web"] {
+		t.Error("expected #web to receive notification despite #bad-channel failure")
+	}
+	if !channelsSeen["#default"] {
+		t.Error("expected #default to receive notification despite #bad-channel failure")
+	}
+}
+
+func TestPostSlack_RepositoryChannels_AllErrorsReported(t *testing.T) {
+	// Multiple channels fail → all errors are joined in the returned error.
+	// "org/worker" is unmapped so it falls back to #default, which also fails.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":false,"error":"channel_not_found"}`))
+	}))
+	defer srv.Close()
+
+	results := []compliance.Result{
+		{Repo: "org/api",    Status: compliance.StatusFail, Severity: config.SeverityError},
+		{Repo: "org/web",    Status: compliance.StatusFail, Severity: config.SeverityError},
+		{Repo: "org/worker", Status: compliance.StatusFail, Severity: config.SeverityError}, // unmapped → #default
+	}
+	cfg := config.SlackConfig{
+		BotToken: "xoxb-fake",
+		Channel:  "#default",
+		RepositoryChannels: []config.RepositoryChannelMapping{
+			{Channels: "#backend",  Repositories: "api"},
+			{Channels: "#frontend", Repositories: "web"},
+		},
+	}
+
+	err := postSlackViaBotURL(srv.URL, cfg, "myorg", results, "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// All three failing channels (#backend, #frontend, #default) must appear in error.
+	for _, ch := range []string{"#backend", "#frontend", "#default"} {
+		if !strings.Contains(err.Error(), ch) {
+			t.Errorf("expected %q in combined error, got: %v", ch, err)
+		}
 	}
 }

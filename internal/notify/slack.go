@@ -3,6 +3,7 @@ package notify
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -119,20 +120,21 @@ func postSlackViaBotURL(apiURL string, cfg config.SlackConfig, org string, resul
 		}
 	}
 
+	var errs []error
 	for ch, chResults := range channelResults {
 		if err := postSlackSummary(apiURL, botToken, ch, org, chResults, resultsURL, true); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
 	// Unmapped repos fall back to the default channel — summary only, no repo list.
 	if len(unmapped) > 0 && cfg.Channel != "" {
 		if err := postSlackSummary(apiURL, botToken, cfg.Channel, org, unmapped, resultsURL, false); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // buildRepoChannelIndex converts RepositoryChannels into a repo-name → channels map.
