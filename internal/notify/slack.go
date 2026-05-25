@@ -217,14 +217,14 @@ func postSlackSummary(url, token, channel, org string, results []compliance.Resu
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack returned status %d", resp.StatusCode)
+		return fmt.Errorf("slack returned status %d for channel %q", resp.StatusCode, channel)
 	}
 
 	// The Slack Web API always returns 200 but signals errors in the JSON body.
 	if token != "" {
 		var apiResp slackAPIResponse
 		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err == nil && !apiResp.OK {
-			return fmt.Errorf("slack API error: %s", apiResp.Error)
+			return fmt.Errorf("slack API error: %s (channel: %q)", apiResp.Error, channel)
 		}
 	}
 
