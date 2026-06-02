@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: git-cascade
+  namespace: eukarya-inc
+  description: Flexible Github repositories compliance check
+  annotations:
+    github.com/project-slug: eukarya-inc/git-cascade
+  links:
+  - url: https://github.com/eukarya-inc/git-cascade
+    title: GitHub
+    icon: github
+  tags:
+  - go
+spec:
+  type: service
+  lifecycle: production
+  owner: eukarya-inc/sre
