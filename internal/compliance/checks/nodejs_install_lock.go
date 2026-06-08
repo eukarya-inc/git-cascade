@@ -20,22 +20,32 @@ var npmInstallPattern = regexp.MustCompile(`\bnpm\s+install(?:\s|$)`)
 // npmGlobalInstallPattern matches `npm install -g` (which is acceptable).
 var npmGlobalInstallPattern = regexp.MustCompile(`\bnpm\s+install\s+.*-g\b`)
 
+// npmCiOrInstallPattern matches `npm ci` or `npm install` (locked or not). It is
+// used to decide whether the check applies to a workflow file at all.
+var npmCiOrInstallPattern = regexp.MustCompile(`\bnpm\s+(?:ci|install)(?:\s|$)`)
+
 // pnpmInstallPattern matches `pnpm install` (bare, triggering a violation check).
 // pnpm add / pnpm i are different commands; only `pnpm install` is checked.
 var pnpmInstallPattern = regexp.MustCompile(`\bpnpm\s+install(?:\s|$)`)
 var pnpmFrozenPattern = regexp.MustCompile(`\bpnpm\s+install\b.*--frozen-lockfile`)
 
-// yarnInstallPattern matches `yarn install` or a bare `yarn` with no subcommand.
-// yarn add / yarn run / yarn build etc. are intentionally excluded.
-var yarnInstallPattern = regexp.MustCompile(`\byarn(?:\s+install)?(?:\s+--|(?:\s*$))`)
+// yarnInstallPattern matches an install-performing yarn invocation: an explicit
+// `yarn install ...`, a bare `yarn` with no subcommand (which performs an install
+// under Yarn Berry), or `yarn --<flag>` such as `yarn --immutable`. yarn add /
+// yarn run / yarn build etc. are intentionally excluded. Informational
+// invocations such as `yarn --version` also match here but are filtered out by
+// yarnInfoFlagPattern below, since they perform no install.
+var yarnInstallPattern = regexp.MustCompile(`\byarn(?:\s+install\b|\s+--|\s*$)`)
+
+// yarnInfoFlagPattern matches a yarn invocation whose argument only prints
+// information (version or help). These perform no install and must not be
+// treated as one — `yarn --version` is a common CI diagnostic step that would
+// otherwise be misreported as an unlocked install.
+var yarnInfoFlagPattern = regexp.MustCompile(`\byarn\s+(?:--version|-v|--help|-h)\b`)
 
 // yarnLockedPattern matches yarn (install) with --frozen-lockfile or --immutable
 // (--immutable is the Yarn Berry / v2+ equivalent).
 var yarnLockedPattern = regexp.MustCompile(`\byarn\b.*(?:--frozen-lockfile|--immutable)`)
-
-// anyNodeInstallPattern detects any npm/pnpm/yarn install invocation (locked or
-// not) and is used to decide whether the check is applicable to a workflow file.
-var anyNodeInstallPattern = regexp.MustCompile(`\b(?:npm\s+(?:ci|install)|pnpm\s+install|yarn(?:\s+install)?(?:\s+--|(?:\s*$)))`)
 
 type nodejsInstallLockChecker struct{}
 
@@ -75,11 +85,11 @@ func (c *nodejsInstallLockChecker) Check(ctx context.Context, client *github.Cli
 			continue
 		}
 
-		text := string(content)
-		if anyNodeInstallPattern.MatchString(text) {
+		reason, sawInstall := scanWorkflow(string(content))
+		if sawInstall {
 			hasInstallCommands = true
 		}
-		if reason := installViolation(text); reason != "" {
+		if reason != "" {
 			violations = append(violations, fmt.Sprintf("%s (%s)", name, reason))
 		}
 	}
@@ -116,26 +126,56 @@ func (c *nodejsInstallLockChecker) Check(ctx context.Context, client *github.Cli
 	}, nil
 }
 
-// installViolation returns a short reason string if the workflow content
-// contains an install command that does not enforce the lockfile, or an empty
-// string if everything looks fine.
-func installViolation(content string) string {
+// scanWorkflow inspects a workflow file's content line by line. It returns a
+// short reason string for the first non-locked install command found (empty if
+// none), and whether any Node.js install command — locked or not — was seen.
+// The latter determines whether this check applies to the repository at all, so
+// a file whose only yarn usage is `yarn --version` reports sawInstall=false.
+func scanWorkflow(content string) (reason string, sawInstall bool) {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
+		if !isNodeInstallLine(line) {
+			continue
+		}
+		sawInstall = true
 		if hasAllowComment(lines, i) {
 			continue
 		}
-		if hasNpmInstallViolation(line) {
-			return "npm install"
+		if reason != "" {
+			continue
 		}
-		if hasPnpmInstallViolation(line) {
-			return "pnpm install without --frozen-lockfile"
-		}
-		if hasYarnInstallViolation(line) {
-			return "yarn install without --frozen-lockfile/--immutable"
+		switch {
+		case hasNpmInstallViolation(line):
+			reason = "npm install"
+		case hasPnpmInstallViolation(line):
+			reason = "pnpm install without --frozen-lockfile"
+		case hasYarnInstallViolation(line):
+			reason = "yarn install without --frozen-lockfile/--immutable"
 		}
 	}
-	return ""
+	return reason, sawInstall
+}
+
+// installViolation returns a short reason string for the first non-locked
+// install command in content, or an empty string if none. It is a thin wrapper
+// over scanWorkflow that discards the applicability flag.
+func installViolation(content string) string {
+	reason, _ := scanWorkflow(content)
+	return reason
+}
+
+// isNodeInstallLine reports whether a single line contains any npm/pnpm/yarn
+// install invocation (locked or not, compliant or not).
+func isNodeInstallLine(line string) bool {
+	return npmCiOrInstallPattern.MatchString(line) ||
+		pnpmInstallPattern.MatchString(line) ||
+		isYarnInstallLine(line)
+}
+
+// isYarnInstallLine reports whether a single line is an install-performing yarn
+// invocation, excluding informational ones such as `yarn --version`.
+func isYarnInstallLine(line string) bool {
+	return yarnInstallPattern.MatchString(line) && !yarnInfoFlagPattern.MatchString(line)
 }
 
 // hasNpmInstallViolation checks whether a single line contains `npm install`
@@ -151,9 +191,10 @@ func hasPnpmInstallViolation(line string) bool {
 }
 
 // hasYarnInstallViolation checks whether a single line contains a bare `yarn`
-// or `yarn install` without --frozen-lockfile or --immutable.
+// or `yarn install` (but not an informational `yarn --version`) without
+// --frozen-lockfile or --immutable.
 func hasYarnInstallViolation(line string) bool {
-	return yarnInstallPattern.MatchString(line) && !yarnLockedPattern.MatchString(line)
+	return isYarnInstallLine(line) && !yarnLockedPattern.MatchString(line)
 }
 
 func init() {

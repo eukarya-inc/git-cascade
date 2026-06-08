@@ -205,6 +205,86 @@ jobs:
 	}
 }
 
+func TestNodejsInstallLockChecker_YarnVersionOnly_Skip(t *testing.T) {
+	// A workflow whose only yarn usage is `yarn --version` performs no install,
+	// so the check is not applicable and must skip (not pass, not fail).
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          corepack enable
+          yarn --version
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusSkip {
+		t.Errorf("expected skip when only `yarn --version` is present, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestNodejsInstallLockChecker_YarnVersionWithImmutableInstall_Pass(t *testing.T) {
+	// Regression: a diagnostic `yarn --version` step alongside a locked
+	// `yarn install --immutable` must not be misreported as an unlocked install.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          corepack enable
+          yarn --version
+      - run: yarn install --immutable
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass when `yarn --version` accompanies a locked install, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestNodejsInstallLockChecker_BareYarnImmutable_Pass(t *testing.T) {
+	// `yarn --immutable` (bare Yarn Berry install with the lock flag) is a valid
+	// locked install and must pass.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: yarn --immutable
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass for `yarn --immutable`, got %s: %s", result.Status, result.Message)
+	}
+}
+
 func TestNodejsInstallLockChecker_NonYamlFileIgnored(t *testing.T) {
 	fake := newFakeGitHub()
 	// Directory contains a README (no .yml/.yaml extension) — must be ignored.
