@@ -34,6 +34,10 @@ func TestInstallViolation(t *testing.T) {
 		{"yarn add is fine", "run: yarn add lodash", ""},
 		{"yarn run is fine", "run: yarn run build", ""},
 		{"yarn build is fine", "run: yarn build", ""},
+		{"setup-node cache: yarn is not an install", "          cache: yarn", ""},
+		{"setup-node cache: 'yarn' is not an install", "          cache: 'yarn'", ""},
+		{"setup-node cache: \"yarn\" is not an install", "          cache: \"yarn\"", ""},
+		{"cache yarn alongside locked install is fine", "          cache: yarn\nrun: yarn install --frozen-lockfile", ""},
 
 		// other
 		{"no npm at all", "run: go build ./...", ""},
@@ -108,6 +112,9 @@ func TestHasYarnInstallViolation(t *testing.T) {
 		{"yarn add is fine", "run: yarn add react", false},
 		{"yarn build is fine", "run: yarn build", false},
 		{"yarn run is fine", "run: yarn run test", false},
+		{"setup-node cache: yarn is not an install", "          cache: yarn", false},
+		{"setup-node cache: 'yarn' is not an install", "          cache: 'yarn'", false},
+		{"bare run: yarn is still an install", "run: yarn", true},
 		{"no yarn", "run: npm ci", false},
 	}
 
