@@ -285,6 +285,67 @@ jobs:
 	}
 }
 
+func TestNodejsInstallLockChecker_SetupNodeCacheYarnWithLockedInstall_Pass(t *testing.T) {
+	// Regression: actions/setup-node's `cache: yarn` input (an unquoted YAML
+	// scalar whose line ends in `yarn`) must not be mistaken for a bare yarn
+	// install. Alongside a locked `yarn install --frozen-lockfile`, the workflow
+	// must pass. Mirrors eukarya-inc/reearth-cloud's license-check.yaml.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"license-check.yaml"})
+	fake.setFile("org", "repo", ".github/workflows/license-check.yaml", []byte(`
+on: [push]
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@abc123
+        with:
+          node-version: lts/*
+          cache: yarn
+          cache-dependency-path: 'ecosystem/extensions/yarn.lock'
+      - name: Install
+        run: yarn install --frozen-lockfile
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass for `cache: yarn` + locked install, got %s: %s", result.Status, result.Message)
+	}
+}
+
+func TestNodejsInstallLockChecker_SetupNodeCacheYarnOnly_Skip(t *testing.T) {
+	// A workflow whose only yarn reference is the `cache: yarn` setup-node input
+	// performs no install, so the check is not applicable and must skip.
+	fake := newFakeGitHub()
+	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})
+	fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(`
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@abc123
+        with:
+          cache: yarn
+      - run: yarn build
+`))
+	_, client := fake.serve(t)
+
+	c := &nodejsInstallLockChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("npm-ci-required"))
+	if err != nil {
+		t.Fatalf("Check returned unexpected error: %v", err)
+	}
+	if result.Status != compliance.StatusSkip {
+		t.Errorf("expected skip when only `cache: yarn` is present, got %s: %s", result.Status, result.Message)
+	}
+}
+
 func TestNodejsInstallLockChecker_NonYamlFileIgnored(t *testing.T) {
 	fake := newFakeGitHub()
 	// Directory contains a README (no .yml/.yaml extension) — must be ignored.

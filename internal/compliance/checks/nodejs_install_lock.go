@@ -43,6 +43,13 @@ var yarnInstallPattern = regexp.MustCompile(`\byarn(?:\s+install\b|\s+--|\s*$)`)
 // otherwise be misreported as an unlocked install.
 var yarnInfoFlagPattern = regexp.MustCompile(`\byarn\s+(?:--version|-v|--help|-h)\b`)
 
+// yarnScalarValuePattern matches a line that assigns the bare value `yarn`
+// (optionally quoted) to a YAML mapping key, e.g. `cache: yarn` from an
+// actions/setup-node `with:` block. The key is captured so a genuine
+// `run: yarn` command can be told apart from a configuration value such as
+// `cache: yarn`, which performs no install and must not be flagged.
+var yarnScalarValuePattern = regexp.MustCompile(`^\s*([\w-]+):\s*['"]?yarn['"]?\s*$`)
+
 // yarnLockedPattern matches yarn (install) with --frozen-lockfile or --immutable
 // (--immutable is the Yarn Berry / v2+ equivalent).
 var yarnLockedPattern = regexp.MustCompile(`\byarn\b.*(?:--frozen-lockfile|--immutable)`)
@@ -173,9 +180,19 @@ func isNodeInstallLine(line string) bool {
 }
 
 // isYarnInstallLine reports whether a single line is an install-performing yarn
-// invocation, excluding informational ones such as `yarn --version`.
+// invocation, excluding informational ones such as `yarn --version` and YAML
+// configuration values such as `cache: yarn`.
 func isYarnInstallLine(line string) bool {
-	return yarnInstallPattern.MatchString(line) && !yarnInfoFlagPattern.MatchString(line)
+	if !yarnInstallPattern.MatchString(line) || yarnInfoFlagPattern.MatchString(line) {
+		return false
+	}
+	// A bare `yarn` token can appear as a YAML configuration value rather than a
+	// shell command — most commonly `cache: yarn` in an actions/setup-node step.
+	// Only `run: yarn` is a real install; any other key (cache, name, …) is not.
+	if m := yarnScalarValuePattern.FindStringSubmatch(line); m != nil && m[1] != "run" {
+		return false
+	}
+	return true
 }
 
 // hasNpmInstallViolation checks whether a single line contains `npm install`
