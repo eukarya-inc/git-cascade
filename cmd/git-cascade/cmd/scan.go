@@ -48,6 +48,8 @@ var scanFlags struct {
 	slackResultURL  string
 	issueMode       string
 	issueRepo       string
+	issueTitle      string
+	issueSectionKey string
 	issueLabels     []string
 
 	concurrency int
@@ -91,8 +93,10 @@ func init() {
 	f.StringVar(&scanFlags.slackResultURL, "slack-results-url", "", "URL to link in Slack notification")
 
 	// GitHub Issues
-	f.StringVar(&scanFlags.issueMode, "issue-mode", "", "Post findings as GitHub Issues: compliance or repo")
-	f.StringVar(&scanFlags.issueRepo, "issue-repo", "", "owner/repo for consolidated issue (mode=compliance)")
+	f.StringVar(&scanFlags.issueMode, "issue-mode", "", "Post findings as GitHub Issues: compliance, repo, or append")
+	f.StringVar(&scanFlags.issueRepo, "issue-repo", "", "owner/repo for consolidated or shared issue (mode=compliance|append)")
+	f.StringVar(&scanFlags.issueTitle, "issue-title", "", "Title of the shared issue to upsert a comment on (mode=append, required)")
+	f.StringVar(&scanFlags.issueSectionKey, "issue-section-key", "", "Identifies this config's comment on a shared issue (mode=append, default: org)")
 	f.StringSliceVar(&scanFlags.issueLabels, "issue-label", nil, "Labels to apply to created issues (repeatable)")
 
 	f.IntVar(&scanFlags.concurrency, "concurrency", 0, "Number of concurrent checks (default 5, or GIT_CASCADE_CONCURRENCY)")
@@ -118,7 +122,7 @@ Output can be written to a file with --output and formatted as table (default),
 json, csv, or sarif (for GitHub Code Scanning).
 
 After scanning, findings can be posted to Slack (--slack-webhook) or as GitHub
-Issues (--issue-mode=compliance|repo).
+Issues (--issue-mode=compliance|repo|append).
 
 Examples:
   # Scan using PAT from environment
@@ -137,7 +141,13 @@ Examples:
   git-cascade scan --org myorg --issue-mode compliance
 
   # Post one issue per failing repo
-  git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-label automated`,
+  git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-label automated
+
+  # Append findings as a comment on a shared, integrated issue used by other scanning tools
+  git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings"
+
+  # Same shared issue, but from a second config that must not overwrite the first's comment
+  git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings" --issue-section-key myorg-frontend`,
 	RunE: runScan,
 }
 
@@ -254,6 +264,16 @@ func runScan(cmd *cobra.Command, args []string) error {
 		issueCfg.ComplianceRepo = scanFlags.issueRepo
 	} else if v := os.Getenv("GIT_CASCADE_ISSUE_REPO"); v != "" && issueCfg.ComplianceRepo == "" {
 		issueCfg.ComplianceRepo = v
+	}
+	if cmd.Flags().Changed("issue-title") {
+		issueCfg.IssueTitle = scanFlags.issueTitle
+	} else if v := os.Getenv("GIT_CASCADE_ISSUE_TITLE"); v != "" && issueCfg.IssueTitle == "" {
+		issueCfg.IssueTitle = v
+	}
+	if cmd.Flags().Changed("issue-section-key") {
+		issueCfg.SectionKey = scanFlags.issueSectionKey
+	} else if v := os.Getenv("GIT_CASCADE_ISSUE_SECTION_KEY"); v != "" && issueCfg.SectionKey == "" {
+		issueCfg.SectionKey = v
 	}
 	if cmd.Flags().Changed("issue-label") {
 		issueCfg.Labels = scanFlags.issueLabels

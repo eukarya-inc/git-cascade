@@ -31,16 +31,21 @@ const consolidatedCommentWorkers = 3
 // PostIssues creates or updates GitHub Issues with scan findings.
 // mode="compliance": one consolidated issue in the compliance repo.
 // mode="repo":       one issue per scanned repo that has failures, posted in that repo.
+// mode="append":     one comment on an existing (or bootstrapped) shared issue,
+//                    identified by cfg.IssueTitle, so multiple scanning tools
+//                    can report into the same integrated issue page.
 // ciURL is an optional link to the CI job run embedded in the issue body.
-// Returns the HTML URL of the upserted issue for mode=compliance (empty string for mode=repo).
+// Returns the HTML URL of the upserted issue for mode=compliance/append (empty string for mode=repo).
 func PostIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string, scope config.Scope) (string, error) {
 	switch cfg.Mode {
 	case "repo":
 		return "", postPerRepoIssues(ctx, client, cfg, results)
 	case "compliance", "":
 		return postConsolidatedIssue(ctx, client, cfg, org, results, ciURL, scope)
+	case "append":
+		return postAppendIssue(ctx, client, cfg, org, results, ciURL, scope)
 	default:
-		return "", fmt.Errorf("unknown issues mode %q (must be \"compliance\" or \"repo\")", cfg.Mode)
+		return "", fmt.Errorf("unknown issues mode %q (must be \"compliance\", \"repo\", or \"append\")", cfg.Mode)
 	}
 }
 
@@ -110,6 +115,151 @@ func postPerRepoIssues(ctx context.Context, client *github.Client, cfg config.Is
 		}
 	}
 	return nil
+}
+
+// sectionCommentPrefix marks the comment git-cascade owns on a shared
+// (mode=append) issue. The full marker is sectionCommentPrefix + sectionKey +
+// " -->". Keying by section lets multiple git-cascade configs/orgs post into
+// the same shared issue, each owning a distinct comment, without clobbering
+// each other — and reruns of the same section edit it in place instead of
+// piling up new comments each scan.
+const sectionCommentPrefix = "<!-- git-cascade:section:"
+
+// parseSectionMarker extracts the section key from a comment that starts
+// with the section marker. Returns ("", false) if the comment isn't one of
+// git-cascade's section comments.
+func parseSectionMarker(body string) (string, bool) {
+	if !strings.HasPrefix(body, sectionCommentPrefix) {
+		return "", false
+	}
+	rest := body[len(sectionCommentPrefix):]
+	key, _, found := strings.Cut(rest, " -->")
+	if !found {
+		return "", false
+	}
+	return key, true
+}
+
+// postAppendIssue upserts a single idempotent comment, scoped to cfg.SectionKey,
+// on an existing (or bootstrapped) issue identified by cfg.IssueTitle, without
+// touching the issue body — that's owned by whichever tool created it, or left
+// minimal if git-cascade creates it. This lets multiple scanning tools (and
+// multiple git-cascade configs/orgs) each report into their own comment on one
+// shared, integrated issue.
+func postAppendIssue(ctx context.Context, client *github.Client, cfg config.IssuesConfig, org string, results []compliance.Result, ciURL string, scope config.Scope) (string, error) {
+	if cfg.IssueTitle == "" {
+		return "", fmt.Errorf("issue_title is required for issues mode \"append\"")
+	}
+	sectionKey := cfg.SectionKey
+	if sectionKey == "" {
+		sectionKey = org
+	}
+
+	repoRef := cfg.ComplianceRepo
+	if repoRef == "" {
+		repoRef = org + "/compliance"
+	}
+	owner, repo, err := splitRepo(repoRef)
+	if err != nil {
+		return "", err
+	}
+
+	issueNumber, htmlURL, err := findOrCreateIssueByTitle(ctx, client, owner, repo, cfg.IssueTitle, cfg.Labels)
+	if err != nil {
+		return "", err
+	}
+
+	marker := sectionCommentPrefix + sectionKey + " -->"
+	byRepo := groupByRepoSorted(results)
+	body := buildSummaryBody(org, byRepo, ciURL, scope)
+	body = marker + "\n" + strings.TrimPrefix(body, gitCascadeMarker+"\n")
+	if len(body) > githubMaxBodyLen {
+		cut := strings.LastIndex(body[:githubMaxBodyLen-100], "\n")
+		if cut < 0 {
+			cut = githubMaxBodyLen - 100
+		}
+		body = body[:cut] + "\n\n_… truncated — too many findings to display in a single comment._\n"
+	}
+
+	existingID, err := findSectionComment(ctx, client, owner, repo, issueNumber, sectionKey)
+	if err != nil {
+		return "", err
+	}
+	if existingID != 0 {
+		if _, _, err := client.Issues.EditComment(ctx, owner, repo, existingID, &github.IssueComment{Body: &body}); err != nil {
+			return "", fmt.Errorf("updating comment on #%d in %s/%s: %w", issueNumber, owner, repo, err)
+		}
+	} else {
+		if _, _, err := client.Issues.CreateComment(ctx, owner, repo, issueNumber, &github.IssueComment{Body: &body}); err != nil {
+			return "", fmt.Errorf("creating comment on #%d in %s/%s: %w", issueNumber, owner, repo, err)
+		}
+	}
+
+	return htmlURL, nil
+}
+
+// findOrCreateIssueByTitle finds an open issue with an exact title match,
+// regardless of who created it or what marker its body carries. If none is
+// found, it creates a bare issue with that title so git-cascade can run
+// before or after the other tools sharing this issue.
+func findOrCreateIssueByTitle(ctx context.Context, client *github.Client, owner, repo, title string, labels []string) (int, string, error) {
+	opts := &github.IssueListByRepoOptions{
+		State:       "open",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	for {
+		issues, resp, err := client.Issues.ListByRepo(ctx, owner, repo, opts)
+		if err != nil {
+			return 0, "", fmt.Errorf("listing issues for %s/%s: %w", owner, repo, err)
+		}
+		for _, issue := range issues {
+			if issue.GetTitle() == title {
+				return issue.GetNumber(), issue.GetHTMLURL(), nil
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.ListOptions.Page = resp.NextPage
+	}
+
+	if labels == nil {
+		labels = []string{}
+	}
+	body := "Integrated findings issue, shared across scanning tools.\n"
+	issue, _, err := client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
+		Title:  &title,
+		Body:   &body,
+		Labels: &labels,
+	})
+	if err != nil {
+		return 0, "", fmt.Errorf("creating shared issue in %s/%s: %w", owner, repo, err)
+	}
+	return issue.GetNumber(), issue.GetHTMLURL(), nil
+}
+
+// findSectionComment returns the ID of the comment owned by the given section
+// key on the issue, or 0 if that section hasn't posted one yet.
+func findSectionComment(ctx context.Context, client *github.Client, owner, repo string, issueNumber int, sectionKey string) (int64, error) {
+	opts := &github.IssueListCommentsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	for {
+		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, issueNumber, opts)
+		if err != nil {
+			return 0, fmt.Errorf("listing comments on #%d in %s/%s: %w", issueNumber, owner, repo, err)
+		}
+		for _, c := range comments {
+			if key, ok := parseSectionMarker(c.GetBody()); ok && key == sectionKey {
+				return c.GetID(), nil
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.ListOptions.Page = resp.NextPage
+	}
+	return 0, nil
 }
 
 // loadRepoComments fetches all comments on the issue and returns a map from

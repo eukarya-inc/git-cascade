@@ -76,10 +76,23 @@ type IssuesConfig struct {
 	// Mode controls where findings are posted:
 	//   "compliance" – one consolidated issue in the compliance config repo
 	//   "repo"       – one issue per scanned repository that has findings
+	//   "append"     – one comment on an existing (or bootstrapped) issue
+	//                  identified by IssueTitle, shared with other scanning
+	//                  tools; git-cascade only owns its own comment.
 	Mode string `yaml:"mode,omitempty"`
-	// ComplianceRepo is the owner/repo for consolidated issue posting (mode=compliance).
+	// ComplianceRepo is the owner/repo for consolidated issue posting
+	// (mode=compliance) or where the shared issue lives (mode=append).
 	// Defaults to the org's compliance repository used for config loading.
 	ComplianceRepo string `yaml:"compliance_repo,omitempty"`
+	// IssueTitle is the title of the shared issue to upsert a comment on
+	// (mode=append only). If no open issue with this title exists, it is
+	// created so git-cascade can run before or after other tools.
+	IssueTitle string `yaml:"issue_title,omitempty"`
+	// SectionKey identifies which comment on the shared issue this run owns
+	// (mode=append only). Distinct git-cascade configs/orgs posting into the
+	// same shared issue must use distinct keys, or they'll overwrite each
+	// other's comment. Defaults to the org name if empty.
+	SectionKey string `yaml:"section_key,omitempty"`
 	// Labels are applied to every created/updated issue.
 	Labels []string `yaml:"labels,omitempty"`
 }

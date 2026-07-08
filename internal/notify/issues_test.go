@@ -522,3 +522,45 @@ func TestPostIssues_UnknownMode(t *testing.T) {
 		t.Errorf("expected unknown mode error, got %v", err)
 	}
 }
+
+func TestPostIssues_AppendMode_RequiresIssueTitle(t *testing.T) {
+	cfg := config.IssuesConfig{Mode: "append"}
+	_, err := PostIssues(t.Context(), nil, cfg, "org", nil, "", config.Scope{})
+	if err == nil || !strings.Contains(err.Error(), "issue_title is required") {
+		t.Errorf("expected issue_title required error, got %v", err)
+	}
+}
+
+// — append-mode section markers —————————————————————————————————————————————
+
+func TestParseSectionMarker_Valid(t *testing.T) {
+	body := sectionCommentPrefix + "myorg -->\n# Compliance Report — myorg\n"
+	key, ok := parseSectionMarker(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if key != "myorg" {
+		t.Errorf("got %q, want myorg", key)
+	}
+}
+
+func TestParseSectionMarker_NotASectionComment(t *testing.T) {
+	_, ok := parseSectionMarker("regular comment without marker")
+	if ok {
+		t.Error("expected ok=false for non-section comment")
+	}
+}
+
+func TestParseSectionMarker_DistinguishesKeys(t *testing.T) {
+	a, _ := parseSectionMarker(sectionCommentPrefix + "team-a -->\nbody")
+	b, _ := parseSectionMarker(sectionCommentPrefix + "team-b -->\nbody")
+	if a == b {
+		t.Error("expected distinct section keys to parse as distinct, so different git-cascade configs don't collide")
+	}
+}
+
+func TestSectionCommentPrefix_DistinctFromRepoAndIssueMarkers(t *testing.T) {
+	if sectionCommentPrefix == gitCascadeMarker || sectionCommentPrefix == repoCommentPrefix {
+		t.Error("sectionCommentPrefix must be distinct so comments don't collide across modes")
+	}
+}

@@ -53,8 +53,12 @@ notify:
     # results_url is a runtime value — use --slack-results-url flag or GIT_CASCADE_SLACK_RESULTS_URL env var
   issues:
     enabled: false
-    mode: compliance   # compliance (one consolidated issue) | repo (one issue per failing repo)
-    # compliance_repo: myorg/compliance  # defaults to <org>/compliance
+    mode: compliance   # compliance (one consolidated issue) | repo (one issue per failing repo) | append (comment on a shared issue)
+    # compliance_repo: myorg/compliance  # defaults to <org>/compliance; also used as the shared-issue repo for mode=append
+    #
+    # --- mode=append only ---
+    # issue_title: "Integrated Findings"  # title of the shared issue to upsert a comment on; created if missing
+    # section_key: myorg-backend          # identifies this config's comment on the shared issue; defaults to org
     labels:
       - compliance
       - automated

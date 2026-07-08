@@ -41,8 +41,10 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_SLACK_BOT_TOKEN` | `--slack-bot-token` | Slack bot user OAuth token (`xoxb-...`) |
 | `GIT_CASCADE_SLACK_CHANNEL` | `--slack-channel` | Default Slack channel (webhook override or bot fallback) |
 | `GIT_CASCADE_SLACK_RESULTS_URL` | `--slack-results-url` | URL linked in the Slack notification (e.g. CI run URL) |
-| `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance` or `repo` |
-| `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated issue (mode=compliance) |
+| `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance`, `repo`, or `append` |
+| `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated or shared issue (mode=compliance\|append) |
+| `GIT_CASCADE_ISSUE_TITLE` | `--issue-title` | Title of the shared issue to upsert a comment on (mode=append, required) |
+| `GIT_CASCADE_ISSUE_SECTION_KEY` | `--issue-section-key` | Identifies this config's comment on a shared issue (mode=append, default: org) |
 | `GIT_CASCADE_CONCURRENCY` | `--concurrency` | Number of concurrent (rule, repo) checks (default: 5) |
 
 ## Authentication
@@ -109,7 +111,7 @@ The table below lists the minimum permissions needed. Use the **read-only** colu
 | Organization: Members | Read | Read |
 | Repository: Issues | — | Read & Write |
 
-The GitHub App must be installed on the organization with access to the repositories you want to scan. For `--issue-mode compliance`, the app also needs Issues write access on the compliance repository.
+The GitHub App must be installed on the organization with access to the repositories you want to scan. For `--issue-mode compliance` or `--issue-mode append`, the app also needs Issues write access on the repository holding the issue (compliance repo, or `--issue-repo` for `append`).
 
 ### Slack Notification
 
@@ -174,6 +176,9 @@ git-cascade scan --org myorg --issue-mode compliance
 
 # Post one issue per failing repository
 git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-label automated
+
+# Append findings as a comment on a shared issue used by other scanning tools
+git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings"
 
 # Suppress progress logging (verbose is on by default)
 git-cascade scan --org myorg --silent
@@ -254,8 +259,10 @@ notify:
     # or GIT_CASCADE_SLACK_RESULTS_URL env var, not stored in config
   issues:
     enabled: false
-    mode: compliance    # compliance = one consolidated issue | repo = one issue per failing repo
-    compliance_repo: "" # owner/repo for mode=compliance; defaults to <org>/compliance
+    mode: compliance    # compliance = one consolidated issue | repo = one issue per failing repo | append = comment on a shared issue
+    compliance_repo: "" # owner/repo for mode=compliance/append; defaults to <org>/compliance
+    issue_title: ""     # title of the shared issue to upsert a comment on (mode=append, required)
+    section_key: ""     # identifies this config's comment on the shared issue (mode=append, default: org)
     labels:
       - compliance
       - automated
@@ -686,12 +693,32 @@ git-cascade can create or update GitHub Issues with the full findings after each
 
 **`--issue-mode repo`** — one issue per scanned repository that has failures, posted directly in that repository.
 
+**`--issue-mode append`** — one comment on an existing (or bootstrapped) issue identified by `--issue-title`, without touching the rest of the issue body. This lets multiple scanning tools — or multiple git-cascade configs — report into the same integrated issue page, each owning a distinct comment.
+
 ```bash
 # Consolidated issue
 git-cascade scan --org myorg --issue-mode compliance --issue-label compliance
 
 # Per-repo issues
 git-cascade scan --org myorg --issue-mode repo --issue-label compliance --issue-label automated
+
+# Append a comment to a shared issue used by other scanning tools
+git-cascade scan --org myorg --issue-mode append \
+  --issue-repo myorg/security \
+  --issue-title "Integrated Findings"
+```
+
+`append` mode requires `--issue-title` (the exact title of the shared issue; created if it doesn't exist yet). Findings are posted as a single comment marked with a hidden `git-cascade:section:<key>` marker, so re-running the scan edits that same comment instead of piling up duplicates.
+
+If more than one git-cascade config/org posts into the same shared issue, set `--issue-section-key` (or `section_key` in config) to a unique value per config — otherwise they default to the org name and distinct orgs won't collide, but two configs for the *same* org would overwrite each other's comment.
+
+```bash
+# Two configs sharing one issue, each owning its own comment
+git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security \
+  --issue-title "Integrated Findings" --issue-section-key myorg-backend
+
+git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security \
+  --issue-title "Integrated Findings" --issue-section-key myorg-frontend
 ```
 
 > Requires Issues: Read & Write permission (see [Required Permissions](#required-permissions)).
