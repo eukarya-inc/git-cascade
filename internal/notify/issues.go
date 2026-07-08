@@ -173,6 +173,7 @@ func postAppendIssue(ctx context.Context, client *github.Client, cfg config.Issu
 	byRepo := groupByRepoSorted(results)
 	body := buildSummaryBody(org, byRepo, ciURL, scope)
 	body = marker + "\n" + strings.TrimPrefix(body, gitCascadeMarker+"\n")
+	body += buildFindingsDetail(byRepo)
 	if len(body) > githubMaxBodyLen {
 		cut := strings.LastIndex(body[:githubMaxBodyLen-100], "\n")
 		if cut < 0 {
@@ -539,6 +540,33 @@ func buildSummaryBody(org string, byRepo map[string][]compliance.Result, ciURL s
 
 	sb.WriteString("\n> Each failing repository has a dedicated comment below with full details.\n\n")
 	fmt.Fprintf(&sb, "---\n_Scope: %s_\n", scopeSummary(scope))
+	return sb.String()
+}
+
+// buildFindingsDetail builds a per-repo findings breakdown for repos with
+// failures, appended after the summary in the append-mode section comment
+// (which — unlike mode=compliance — has no separate per-repo comments to
+// hold this detail).
+func buildFindingsDetail(byRepo map[string][]compliance.Result) string {
+	repos := make([]string, 0, len(byRepo))
+	for r := range byRepo {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+
+	var sb strings.Builder
+	for _, repoFull := range repos {
+		failures := filterFailed(byRepo[repoFull])
+		if len(failures) == 0 {
+			continue
+		}
+		fmt.Fprintf(&sb, "\n## `%s` findings\n\n", repoFull)
+		sb.WriteString("| Rule | Severity | Message |\n")
+		sb.WriteString("|------|----------|---------|\n")
+		for _, r := range failures {
+			fmt.Fprintf(&sb, "| `%s` | %s | %s |\n", r.RuleID, r.Severity, escapeTableCell(r.Message))
+		}
+	}
 	return sb.String()
 }
 
