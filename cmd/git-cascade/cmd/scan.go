@@ -23,6 +23,15 @@ var scanFlags struct {
 	installationID int64
 	privateKeyPath string
 
+	// GitHub / auth for notifications (GitHub Issues), when the notify
+	// target (e.g. a compliance repo in a different org) needs different
+	// credentials than the org being scanned. Falls back to the scan
+	// credentials above when left unset.
+	notifyToken          string
+	notifyAppID          int64
+	notifyInstallationID int64
+	notifyPrivateKeyPath string
+
 	// Config loading
 	configRepo  string
 	configPath  string
@@ -68,6 +77,12 @@ func init() {
 	f.Int64Var(&scanFlags.appID, "app-id", 0, "GitHub App ID")
 	f.Int64Var(&scanFlags.installationID, "installation-id", 0, "GitHub App Installation ID")
 	f.StringVar(&scanFlags.privateKeyPath, "private-key-path", "", "Path to GitHub App private key PEM file")
+
+	// GitHub / auth for notifications (defaults to scan credentials above)
+	f.StringVar(&scanFlags.notifyToken, "notify-token", "", "GitHub Personal Access Token for posting notifications, if different from --token (or set GIT_CASCADE_NOTIFY_TOKEN)")
+	f.Int64Var(&scanFlags.notifyAppID, "notify-app-id", 0, "GitHub App ID for posting notifications, if different from --app-id")
+	f.Int64Var(&scanFlags.notifyInstallationID, "notify-installation-id", 0, "GitHub App Installation ID for posting notifications, if different from --installation-id")
+	f.StringVar(&scanFlags.notifyPrivateKeyPath, "notify-private-key-path", "", "Path to GitHub App private key PEM file for posting notifications, if different from --private-key-path")
 
 	// Config loading
 	f.StringVar(&scanFlags.configRepo, "config-repo", compliance.DefaultConfigRepo, "Repository containing compliance configs")
@@ -149,7 +164,11 @@ Examples:
   git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings"
 
   # Same shared issue, but from a second config that must not overwrite the first's comment
-  git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings" --issue-section-key myorg-frontend`,
+  git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security --issue-title "Integrated Findings" --issue-section-key myorg-frontend
+
+  # Scan org-a but post the compliance issue into org-b, using a separate token
+  # scoped to org-b (falls back to --token when --notify-token is unset)
+  git-cascade scan --org org-a --token $ORG_A_TOKEN --issue-mode compliance --issue-repo org-b/compliance --notify-token $ORG_B_TOKEN`,
 	RunE: runScan,
 }
 
@@ -291,9 +310,16 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	var issueURL string
 	if issueCfg.Enabled {
+		notifyCreds, err := resolveNotifyCredentials(creds)
+		if err != nil {
+			return fmt.Errorf("resolving notify credentials: %w", err)
+		}
+		notifyClient, err := gh.NewClient(notifyCreds)
+		if err != nil {
+			return fmt.Errorf("creating notify GitHub client: %w", err)
+		}
 		logger.Info("posting GitHub Issues", "mode", issueCfg.Mode)
-		var err error
-		issueURL, err = notify.PostIssues(ctx, client, issueCfg, scanFlags.org, results, ciURL, cfg.Scope)
+		issueURL, err = notify.PostIssues(ctx, notifyClient, issueCfg, scanFlags.org, results, ciURL, cfg.Scope)
 		if err != nil {
 			return fmt.Errorf("posting issues: %w", err)
 		}
@@ -339,40 +365,94 @@ func runScan(cmd *cobra.Command, args []string) error {
 }
 
 func resolveCredentials() (gh.Credentials, error) {
-	// PAT: flag takes priority, then env vars (handled by CredentialsFromEnv)
-	if scanFlags.token != "" {
-		return gh.Credentials{
-			Method: gh.AuthPAT,
-			Token:  scanFlags.token,
-		}, nil
+	return resolveCredentialsFrom(credentialFlags{
+		token:          scanFlags.token,
+		appID:          scanFlags.appID,
+		installationID: scanFlags.installationID,
+		privateKeyPath: scanFlags.privateKeyPath,
+		tokenEnv:       "GIT_CASCADE_TOKEN",
+		appIDEnv:       "GIT_CASCADE_APP_ID",
+		installIDEnv:   "GIT_CASCADE_INSTALLATION_ID",
+		privateKeyEnv:  "GIT_CASCADE_PRIVATE_KEY_PATH",
+		flagPrefix:     "--",
+	})
+}
+
+// resolveNotifyCredentials resolves credentials for posting notifications
+// (e.g. GitHub Issues). It falls back to scanCreds when no --notify-* flag
+// or GIT_CASCADE_NOTIFY_* env var is set, so a single-org setup needs no
+// extra configuration; a cross-org compliance repo can supply its own token
+// or GitHub App identity via --notify-token / --notify-app-id etc.
+func resolveNotifyCredentials(scanCreds gh.Credentials) (gh.Credentials, error) {
+	if scanFlags.notifyToken == "" && scanFlags.notifyAppID == 0 &&
+		scanFlags.notifyInstallationID == 0 && scanFlags.notifyPrivateKeyPath == "" &&
+		os.Getenv("GIT_CASCADE_NOTIFY_TOKEN") == "" && os.Getenv("GIT_CASCADE_NOTIFY_APP_ID") == "" &&
+		os.Getenv("GIT_CASCADE_NOTIFY_INSTALLATION_ID") == "" && os.Getenv("GIT_CASCADE_NOTIFY_PRIVATE_KEY_PATH") == "" {
+		return scanCreds, nil
+	}
+	return resolveCredentialsFrom(credentialFlags{
+		token:          scanFlags.notifyToken,
+		appID:          scanFlags.notifyAppID,
+		installationID: scanFlags.notifyInstallationID,
+		privateKeyPath: scanFlags.notifyPrivateKeyPath,
+		tokenEnv:       "GIT_CASCADE_NOTIFY_TOKEN",
+		appIDEnv:       "GIT_CASCADE_NOTIFY_APP_ID",
+		installIDEnv:   "GIT_CASCADE_NOTIFY_INSTALLATION_ID",
+		privateKeyEnv:  "GIT_CASCADE_NOTIFY_PRIVATE_KEY_PATH",
+		flagPrefix:     "--notify-",
+	})
+}
+
+// credentialFlags names the CLI flag values and env var keys resolveCredentialsFrom
+// should read for one credential set (scan or notify).
+type credentialFlags struct {
+	token          string
+	appID          int64
+	installationID int64
+	privateKeyPath string
+	tokenEnv       string
+	appIDEnv       string
+	installIDEnv   string
+	privateKeyEnv  string
+	flagPrefix     string
+}
+
+func resolveCredentialsFrom(f credentialFlags) (gh.Credentials, error) {
+	// PAT: flag takes priority, then env var
+	if f.token != "" {
+		return gh.Credentials{Method: gh.AuthPAT, Token: f.token}, nil
+	}
+	if v := os.Getenv(f.tokenEnv); v != "" {
+		return gh.Credentials{Method: gh.AuthPAT, Token: v}, nil
 	}
 
 	// GitHub App: merge CLI flags with env var fallbacks so partial flag sets work
-	appID := scanFlags.appID
-	installationID := scanFlags.installationID
-	privateKeyPath := scanFlags.privateKeyPath
+	appID := f.appID
+	installationID := f.installationID
+	privateKeyPath := f.privateKeyPath
 	if appID == 0 {
-		if v := os.Getenv("GIT_CASCADE_APP_ID"); v != "" {
+		if v := os.Getenv(f.appIDEnv); v != "" {
 			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 				appID = n
 			}
 		}
 	}
 	if installationID == 0 {
-		if v := os.Getenv("GIT_CASCADE_INSTALLATION_ID"); v != "" {
+		if v := os.Getenv(f.installIDEnv); v != "" {
 			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 				installationID = n
 			}
 		}
 	}
 	if privateKeyPath == "" {
-		privateKeyPath = os.Getenv("GIT_CASCADE_PRIVATE_KEY_PATH")
+		privateKeyPath = os.Getenv(f.privateKeyEnv)
 	}
 	if appID != 0 || installationID != 0 || privateKeyPath != "" {
 		// At least one App field was set — validate all three are present
 		if appID == 0 || installationID == 0 || privateKeyPath == "" {
 			return gh.Credentials{}, fmt.Errorf(
-				"GitHub App auth requires --app-id, --installation-id, and --private-key-path (or their env var equivalents)",
+				"GitHub App auth requires %sapp-id, %sinstallation-id, and %sprivate-key-path (or their env var equivalents)",
+				f.flagPrefix, f.flagPrefix, f.flagPrefix,
 			)
 		}
 		return gh.Credentials{

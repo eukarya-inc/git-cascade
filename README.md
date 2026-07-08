@@ -37,6 +37,10 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_APP_ID` | `--app-id` | GitHub App ID |
 | `GIT_CASCADE_INSTALLATION_ID` | `--installation-id` | GitHub App Installation ID |
 | `GIT_CASCADE_PRIVATE_KEY_PATH` | `--private-key-path` | Path to the GitHub App private key PEM file |
+| `GIT_CASCADE_NOTIFY_TOKEN` | `--notify-token` | GitHub PAT for posting notifications, if different from the scan token (falls back to scan credentials) |
+| `GIT_CASCADE_NOTIFY_APP_ID` | `--notify-app-id` | GitHub App ID for posting notifications, if different from the scan App |
+| `GIT_CASCADE_NOTIFY_INSTALLATION_ID` | `--notify-installation-id` | GitHub App Installation ID for posting notifications |
+| `GIT_CASCADE_NOTIFY_PRIVATE_KEY_PATH` | `--notify-private-key-path` | Path to the GitHub App private key PEM file for posting notifications |
 | `GIT_CASCADE_SLACK_WEBHOOK` | `--slack-webhook` | Slack Incoming Webhook URL |
 | `GIT_CASCADE_SLACK_BOT_TOKEN` | `--slack-bot-token` | Slack bot user OAuth token (`xoxb-...`) |
 | `GIT_CASCADE_SLACK_CHANNEL` | `--slack-channel` | Default Slack channel (webhook override or bot fallback) |
@@ -75,6 +79,22 @@ git-cascade scan --org myorg \
   --app-id 12345 \
   --installation-id 67890 \
   --private-key-path key.pem
+```
+
+### Separate credentials for notifications
+
+By default, notifications (GitHub Issues) are posted using the same credentials as the scan. If the notify target — e.g. a `compliance_repo` in a different organization via `--issue-repo` — isn't reachable with the scan token, supply separate credentials with the `--notify-*` flags (or `GIT_CASCADE_NOTIFY_*` env vars). Any `--notify-*` value left unset falls back to its scan-side equivalent.
+
+```bash
+# Scan org-a with one token, post the compliance issue into org-b with another
+git-cascade scan --org org-a --token $ORG_A_TOKEN \
+  --issue-mode compliance --issue-repo org-b/compliance \
+  --notify-token $ORG_B_TOKEN
+
+# GitHub App credentials work the same way
+git-cascade scan --org org-a --app-id 111 --installation-id 222 --private-key-path org-a.pem \
+  --issue-mode compliance --issue-repo org-b/compliance \
+  --notify-app-id 333 --notify-installation-id 444 --notify-private-key-path org-b.pem
 ```
 
 ## Required Permissions

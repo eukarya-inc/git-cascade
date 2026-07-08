@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
@@ -13,6 +14,10 @@ func resetScanFlags() {
 	scanFlags.appID = 0
 	scanFlags.installationID = 0
 	scanFlags.privateKeyPath = ""
+	scanFlags.notifyToken = ""
+	scanFlags.notifyAppID = 0
+	scanFlags.notifyInstallationID = 0
+	scanFlags.notifyPrivateKeyPath = ""
 }
 
 // TestResolveCredentials_PATFlag verifies that a non-empty --token flag
@@ -179,5 +184,97 @@ func TestResolveCredentials_AppIDEnvInvalidFormat(t *testing.T) {
 	// Invalid app-id is ignored; falls back to PAT from env.
 	if creds.Token != "fallback_token" {
 		t.Errorf("expected fallback_token, got %q", creds.Token)
+	}
+}
+
+// TestResolveNotifyCredentials_FallsBackToScanCreds verifies that with no
+// --notify-* flag or env var set, resolveNotifyCredentials returns the scan
+// credentials unchanged.
+func TestResolveNotifyCredentials_FallsBackToScanCreds(t *testing.T) {
+	resetScanFlags()
+	t.Setenv("GIT_CASCADE_NOTIFY_TOKEN", "")
+	t.Setenv("GIT_CASCADE_NOTIFY_APP_ID", "")
+	t.Setenv("GIT_CASCADE_NOTIFY_INSTALLATION_ID", "")
+	t.Setenv("GIT_CASCADE_NOTIFY_PRIVATE_KEY_PATH", "")
+
+	scanCreds := gh.Credentials{Method: gh.AuthPAT, Token: "scan_token"}
+	creds, err := resolveNotifyCredentials(scanCreds)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds != scanCreds {
+		t.Errorf("expected scan creds unchanged, got %+v", creds)
+	}
+}
+
+// TestResolveNotifyCredentials_PATFlagOverrides verifies that --notify-token
+// takes priority over falling back to scan credentials.
+func TestResolveNotifyCredentials_PATFlagOverrides(t *testing.T) {
+	resetScanFlags()
+	scanFlags.notifyToken = "notify_token"
+
+	scanCreds := gh.Credentials{Method: gh.AuthPAT, Token: "scan_token"}
+	creds, err := resolveNotifyCredentials(scanCreds)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Method != gh.AuthPAT || creds.Token != "notify_token" {
+		t.Errorf("expected notify_token to override scan creds, got %+v", creds)
+	}
+}
+
+// TestResolveNotifyCredentials_EnvOverrides verifies GIT_CASCADE_NOTIFY_TOKEN
+// takes priority over falling back to scan credentials.
+func TestResolveNotifyCredentials_EnvOverrides(t *testing.T) {
+	resetScanFlags()
+	t.Setenv("GIT_CASCADE_NOTIFY_TOKEN", "notify_env_token")
+
+	scanCreds := gh.Credentials{Method: gh.AuthPAT, Token: "scan_token"}
+	creds, err := resolveNotifyCredentials(scanCreds)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Token != "notify_env_token" {
+		t.Errorf("expected notify_env_token, got %q", creds.Token)
+	}
+}
+
+// TestResolveNotifyCredentials_AppFlagsIndependentOfScan verifies a full
+// GitHub App identity can be supplied for notify independent of scan's method.
+func TestResolveNotifyCredentials_AppFlagsIndependentOfScan(t *testing.T) {
+	resetScanFlags()
+	scanFlags.notifyAppID = 111
+	scanFlags.notifyInstallationID = 222
+	scanFlags.notifyPrivateKeyPath = "/tmp/notify-key.pem"
+
+	scanCreds := gh.Credentials{Method: gh.AuthPAT, Token: "scan_token"}
+	creds, err := resolveNotifyCredentials(scanCreds)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Method != gh.AuthGitHubApp {
+		t.Errorf("expected AuthGitHubApp, got %v", creds.Method)
+	}
+	if creds.AppID != 111 || creds.InstallationID != 222 || creds.PrivateKeyPath != "/tmp/notify-key.pem" {
+		t.Errorf("expected notify App identity, got %+v", creds)
+	}
+}
+
+// TestResolveNotifyCredentials_PartialAppFlagsError verifies an incomplete
+// --notify-* App identity (missing installation ID) surfaces an error that
+// names the --notify- flags, not the scan flags.
+func TestResolveNotifyCredentials_PartialAppFlagsError(t *testing.T) {
+	resetScanFlags()
+	scanFlags.notifyAppID = 111
+	scanFlags.notifyPrivateKeyPath = "/tmp/notify-key.pem"
+	// notifyInstallationID left 0
+
+	scanCreds := gh.Credentials{Method: gh.AuthPAT, Token: "scan_token"}
+	_, err := resolveNotifyCredentials(scanCreds)
+	if err == nil {
+		t.Fatal("expected error for incomplete notify App credentials")
+	}
+	if !strings.Contains(err.Error(), "--notify-") {
+		t.Errorf("expected error to reference --notify- flags, got: %v", err)
 	}
 }
