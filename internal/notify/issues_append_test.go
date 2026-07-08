@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
@@ -247,6 +248,34 @@ func TestPostAppendIssue_CreatesIssueAndComment(t *testing.T) {
 	}
 	if got := bodies[0]; !hasPrefix(got, sectionCommentPrefix+"myorg -->") {
 		t.Errorf("comment missing section marker for default org key: %q", got)
+	}
+}
+
+func TestPostAppendIssue_CommentIncludesFindingsDetail(t *testing.T) {
+	fake := newFakeIssuesAPI()
+	client := fake.serve(t)
+
+	cfg := config.IssuesConfig{
+		Mode:           "append",
+		ComplianceRepo: "o/r",
+		IssueTitle:     "Integrated Findings",
+	}
+	results := []compliance.Result{makeResultWithRule("o/myrepo", "no-secrets", compliance.StatusFail, config.SeverityError, false)}
+
+	if _, err := postAppendIssue(t.Context(), client, cfg, "myorg", results, "", config.Scope{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	bodies := fake.commentBodies(fake.issues[0].GetNumber())
+	if len(bodies) != 1 {
+		t.Fatalf("expected one comment, got %d", len(bodies))
+	}
+	got := bodies[0]
+	if !strings.Contains(got, "`o/myrepo` findings") {
+		t.Errorf("comment missing per-repo findings heading: %q", got)
+	}
+	if !strings.Contains(got, "no-secrets") || !strings.Contains(got, "test message for no-secrets") {
+		t.Errorf("comment missing finding detail (rule/message): %q", got)
 	}
 }
 
