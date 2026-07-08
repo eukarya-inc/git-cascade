@@ -201,28 +201,38 @@ func TestParseRepoMarker_MissingCloser(t *testing.T) {
 // — buildSummaryBody ——————————————————————————————————————————————————————————
 
 func TestBuildSummaryBody_ContainsMarker(t *testing.T) {
-	body := buildSummaryBody("myorg", map[string][]compliance.Result{}, "", config.Scope{})
+	body := buildSummaryBody("myorg", map[string][]compliance.Result{}, "", config.Scope{}, "")
 	if !strings.Contains(body, gitCascadeMarker) {
 		t.Error("expected git-cascade marker in summary body")
 	}
 }
 
 func TestBuildSummaryBody_ContainsOrgName(t *testing.T) {
-	body := buildSummaryBody("eukarya", map[string][]compliance.Result{}, "", config.Scope{})
+	body := buildSummaryBody("eukarya", map[string][]compliance.Result{}, "", config.Scope{}, "")
 	if !strings.Contains(body, "eukarya") {
 		t.Error("expected org name in summary body")
 	}
 }
 
+func TestBuildSummaryBody_CustomHeader(t *testing.T) {
+	body := buildSummaryBody("myorg", map[string][]compliance.Result{}, "", config.Scope{}, "# My Custom Report")
+	if !strings.Contains(body, "# My Custom Report") {
+		t.Error("expected custom header in summary body")
+	}
+	if strings.Contains(body, "Compliance Report") {
+		t.Error("expected default header to be replaced, not appended")
+	}
+}
+
 func TestBuildSummaryBody_CILink(t *testing.T) {
-	body := buildSummaryBody("myorg", nil, "https://ci.example.com/run/123", config.Scope{})
+	body := buildSummaryBody("myorg", nil, "https://ci.example.com/run/123", config.Scope{}, "")
 	if !strings.Contains(body, "https://ci.example.com/run/123") {
 		t.Error("expected CI URL in body")
 	}
 }
 
 func TestBuildSummaryBody_NoCILink(t *testing.T) {
-	body := buildSummaryBody("myorg", nil, "", config.Scope{})
+	body := buildSummaryBody("myorg", nil, "", config.Scope{}, "")
 	if strings.Contains(body, "View CI run") {
 		t.Error("expected no CI link when ciURL is empty")
 	}
@@ -237,7 +247,7 @@ func TestBuildSummaryBody_RepoTable(t *testing.T) {
 			makeResult("org/web", compliance.StatusPass, config.SeverityWarning, false),
 		},
 	}
-	body := buildSummaryBody("myorg", byRepo, "", config.Scope{})
+	body := buildSummaryBody("myorg", byRepo, "", config.Scope{}, "")
 
 	if !strings.Contains(body, "org/api") {
 		t.Error("expected org/api in summary table")
@@ -262,7 +272,7 @@ func TestBuildSummaryBody_DoesNotContainFindingDetails(t *testing.T) {
 			makeResultWithRule("org/api", "branch-protection", compliance.StatusFail, config.SeverityError, false),
 		},
 	}
-	body := buildSummaryBody("myorg", byRepo, "", config.Scope{})
+	body := buildSummaryBody("myorg", byRepo, "", config.Scope{}, "")
 	if strings.Contains(body, "branch-protection") {
 		t.Error("summary body should not contain individual rule IDs — those belong in per-repo comments")
 	}
@@ -270,7 +280,7 @@ func TestBuildSummaryBody_DoesNotContainFindingDetails(t *testing.T) {
 
 func TestBuildSummaryBody_ScopeIncluded(t *testing.T) {
 	scope := config.Scope{IncludeRepos: []string{"org/api"}}
-	body := buildSummaryBody("myorg", nil, "", scope)
+	body := buildSummaryBody("myorg", nil, "", scope, "")
 	if !strings.Contains(body, "org/api") {
 		t.Error("expected scope repos to appear in body")
 	}
@@ -280,7 +290,7 @@ func TestBuildSummaryBody_AllPassStatusIcon(t *testing.T) {
 	byRepo := map[string][]compliance.Result{
 		"org/a": {makeResult("org/a", compliance.StatusPass, config.SeverityError, false)},
 	}
-	body := buildSummaryBody("myorg", byRepo, "", config.Scope{})
+	body := buildSummaryBody("myorg", byRepo, "", config.Scope{}, "")
 	// Overall ✅ should appear when no failures.
 	if !strings.Contains(body, "✅") {
 		t.Error("expected ✅ overall icon when all repos pass")
@@ -294,7 +304,7 @@ func TestBuildSummaryBody_ErrorStatusIcon(t *testing.T) {
 	byRepo := map[string][]compliance.Result{
 		"org/a": {makeResult("org/a", compliance.StatusFail, config.SeverityError, false)},
 	}
-	body := buildSummaryBody("myorg", byRepo, "", config.Scope{})
+	body := buildSummaryBody("myorg", byRepo, "", config.Scope{}, "")
 	if !strings.Contains(body, "❌") {
 		t.Error("expected ❌ overall icon when errors exist")
 	}

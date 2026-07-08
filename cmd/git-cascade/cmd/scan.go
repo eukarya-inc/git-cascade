@@ -48,6 +48,7 @@ var scanFlags struct {
 	slackResultURL  string
 	issueMode       string
 	issueRepo       string
+	issueHeader     string
 	issueTitle      string
 	issueSectionKey string
 	issueLabels     []string
@@ -95,6 +96,7 @@ func init() {
 	// GitHub Issues
 	f.StringVar(&scanFlags.issueMode, "issue-mode", "", "Post findings as GitHub Issues: compliance, repo, or append")
 	f.StringVar(&scanFlags.issueRepo, "issue-repo", "", "owner/repo for consolidated or shared issue (mode=compliance|append)")
+	f.StringVar(&scanFlags.issueHeader, "issue-header", "", "Override the issue body heading (mode=compliance, default: \"# Compliance Report — {org}\")")
 	f.StringVar(&scanFlags.issueTitle, "issue-title", "", "Title of the shared issue to upsert a comment on (mode=append, required)")
 	f.StringVar(&scanFlags.issueSectionKey, "issue-section-key", "", "Identifies this config's comment on a shared issue (mode=append, default: org)")
 	f.StringSliceVar(&scanFlags.issueLabels, "issue-label", nil, "Labels to apply to created issues (repeatable)")
@@ -264,6 +266,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 		issueCfg.ComplianceRepo = scanFlags.issueRepo
 	} else if v := os.Getenv("GIT_CASCADE_ISSUE_REPO"); v != "" && issueCfg.ComplianceRepo == "" {
 		issueCfg.ComplianceRepo = v
+	}
+	if cmd.Flags().Changed("issue-header") {
+		issueCfg.HeaderText = scanFlags.issueHeader
+	} else if v := os.Getenv("GIT_CASCADE_ISSUE_HEADER"); v != "" && issueCfg.HeaderText == "" {
+		issueCfg.HeaderText = v
 	}
 	if cmd.Flags().Changed("issue-title") {
 		issueCfg.IssueTitle = scanFlags.issueTitle

@@ -84,6 +84,10 @@ type IssuesConfig struct {
 	// (mode=compliance) or where the shared issue lives (mode=append).
 	// Defaults to the org's compliance repository used for config loading.
 	ComplianceRepo string `yaml:"compliance_repo,omitempty"`
+	// HeaderText overrides the "# Compliance Report — {org}" heading at the
+	// top of the issue body (mode=compliance only). Defaults to that text
+	// when empty.
+	HeaderText string `yaml:"header_text,omitempty"`
 	// IssueTitle is the title of the shared issue to upsert a comment on
 	// (mode=append only). If no open issue with this title exists, it is
 	// created so git-cascade can run before or after other tools.

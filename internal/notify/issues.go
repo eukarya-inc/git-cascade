@@ -77,7 +77,7 @@ func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg confi
 	byRepo := groupByRepoSorted(results)
 
 	// Build and upsert the summary issue body.
-	summaryBody := buildSummaryBody(org, byRepo, ciURL, scope)
+	summaryBody := buildSummaryBody(org, byRepo, ciURL, scope, cfg.HeaderText)
 	issueNumber, htmlURL, err := upsertIssue(ctx, client, owner, repo, issueTitle, summaryBody, cfg.Labels)
 	if err != nil {
 		return "", err
@@ -171,8 +171,10 @@ func postAppendIssue(ctx context.Context, client *github.Client, cfg config.Issu
 
 	marker := sectionCommentPrefix + sectionKey + " -->"
 	byRepo := groupByRepoSorted(results)
-	body := buildSummaryBody(org, byRepo, ciURL, scope)
-	body = marker + "\n" + strings.TrimPrefix(body, gitCascadeMarker+"\n")
+	body := buildSummaryBody(org, byRepo, ciURL, scope, "")
+	body = strings.TrimPrefix(body, gitCascadeMarker+"\n")
+	body = strings.TrimPrefix(body, fmt.Sprintf("# Compliance Report — %s\n\n", org))
+	body = marker + "\n" + body
 	body += buildFindingsDetail(byRepo)
 	if len(body) > githubMaxBodyLen {
 		cut := strings.LastIndex(body[:githubMaxBodyLen-100], "\n")
@@ -477,11 +479,15 @@ func findExistingIssue(ctx context.Context, client *github.Client, owner, repo, 
 }
 
 // buildSummaryBody builds the issue body: scan metadata and a per-repo status
-// table. Individual findings are in per-repo comments, not here.
-func buildSummaryBody(org string, byRepo map[string][]compliance.Result, ciURL string, scope config.Scope) string {
+// table. Individual findings are in per-repo comments, not here. header
+// overrides the default "# Compliance Report — {org}" heading when non-empty.
+func buildSummaryBody(org string, byRepo map[string][]compliance.Result, ciURL string, scope config.Scope, header string) string {
 	var sb strings.Builder
 	sb.WriteString(gitCascadeMarker + "\n")
-	fmt.Fprintf(&sb, "# Compliance Report — %s\n\n", org)
+	if header == "" {
+		header = fmt.Sprintf("# Compliance Report — %s", org)
+	}
+	fmt.Fprintf(&sb, "%s\n\n", header)
 
 	updated := time.Now().UTC().Format(time.RFC3339)
 	if ciURL != "" {
