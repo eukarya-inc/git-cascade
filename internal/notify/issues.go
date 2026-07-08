@@ -74,11 +74,16 @@ func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg confi
 		return "", err
 	}
 
+	title := issueTitle
+	if cfg.IssueTitle != "" {
+		title = cfg.IssueTitle
+	}
+
 	byRepo := groupByRepoSorted(results)
 
 	// Build and upsert the summary issue body.
 	summaryBody := buildSummaryBody(org, byRepo, ciURL, scope, cfg.HeaderText)
-	issueNumber, htmlURL, err := upsertIssue(ctx, client, owner, repo, issueTitle, summaryBody, cfg.Labels)
+	issueNumber, htmlURL, err := upsertIssue(ctx, client, owner, repo, title, summaryBody, cfg.Labels)
 	if err != nil {
 		return "", err
 	}
@@ -99,6 +104,11 @@ func postConsolidatedIssue(ctx context.Context, client *github.Client, cfg confi
 
 // postPerRepoIssues creates or updates one issue per repository that has failures.
 func postPerRepoIssues(ctx context.Context, client *github.Client, cfg config.IssuesConfig, results []compliance.Result) error {
+	title := issueTitlePerRepo
+	if cfg.IssueTitle != "" {
+		title = cfg.IssueTitle
+	}
+
 	byRepo := groupByRepo(results)
 	for repoFull, repoResults := range byRepo {
 		failures := filterFailed(repoResults)
@@ -110,7 +120,7 @@ func postPerRepoIssues(ctx context.Context, client *github.Client, cfg config.Is
 			return err
 		}
 		body := buildPerRepoBody(repoFull, failures)
-		if _, _, err := upsertIssue(ctx, client, owner, repo, issueTitlePerRepo, body, cfg.Labels); err != nil {
+		if _, _, err := upsertIssue(ctx, client, owner, repo, title, body, cfg.Labels); err != nil {
 			return fmt.Errorf("posting issue to %s: %w", repoFull, err)
 		}
 	}

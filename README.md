@@ -44,7 +44,7 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_ISSUE_MODE` | `--issue-mode` | Post findings as GitHub Issues: `compliance`, `repo`, or `append` |
 | `GIT_CASCADE_ISSUE_REPO` | `--issue-repo` | `owner/repo` for consolidated or shared issue (mode=compliance\|append) |
 | `GIT_CASCADE_ISSUE_HEADER` | `--issue-header` | Override the issue body heading (mode=compliance, default: `# Compliance Report — {org}`) |
-| `GIT_CASCADE_ISSUE_TITLE` | `--issue-title` | Title of the shared issue to upsert a comment on (mode=append, required) |
+| `GIT_CASCADE_ISSUE_TITLE` | `--issue-title` | Issue title (required for mode=append; overrides the default title for mode=compliance\|repo) |
 | `GIT_CASCADE_ISSUE_SECTION_KEY` | `--issue-section-key` | Identifies this config's comment on a shared issue (mode=append, default: org) |
 | `GIT_CASCADE_CONCURRENCY` | `--concurrency` | Number of concurrent (rule, repo) checks (default: 5) |
 
@@ -263,7 +263,7 @@ notify:
     mode: compliance    # compliance = one consolidated issue | repo = one issue per failing repo | append = comment on a shared issue
     compliance_repo: "" # owner/repo for mode=compliance/append; defaults to <org>/compliance
     header_text: ""     # overrides the "# Compliance Report — {org}" heading (mode=compliance)
-    issue_title: ""     # title of the shared issue to upsert a comment on (mode=append, required)
+    issue_title: ""     # shared issue title (mode=append, required); overrides default issue title for mode=compliance/repo
     section_key: ""     # identifies this config's comment on the shared issue (mode=append, default: org)
     labels:
       - compliance
@@ -691,9 +691,9 @@ git-cascade scan --org myorg \
 
 git-cascade can create or update GitHub Issues with the full findings after each scan. Issues are upserted — re-running the scan updates the existing issue rather than creating duplicates.
 
-**`--issue-mode compliance`** — one consolidated issue in `{org}/compliance` (or `--issue-repo owner/repo`), grouping all findings by repository. The issue body heading defaults to `# Compliance Report — {org}`; override it with `--issue-header`.
+**`--issue-mode compliance`** — one consolidated issue in `{org}/compliance` (or `--issue-repo owner/repo`), grouping all findings by repository. The issue body heading defaults to `# Compliance Report — {org}`; override it with `--issue-header`. The issue title defaults to `[COMPLIANCE] non-compliant item findings`; override it with `--issue-title`.
 
-**`--issue-mode repo`** — one issue per scanned repository that has failures, posted directly in that repository.
+**`--issue-mode repo`** — one issue per scanned repository that has failures, posted directly in that repository. The issue title defaults to `[COMPLIANCE] non-compliant item findings`; override it with `--issue-title`.
 
 **`--issue-mode append`** — one comment on an existing (or bootstrapped) issue identified by `--issue-title`, without touching the rest of the issue body. This lets multiple scanning tools — or multiple git-cascade configs — report into the same integrated issue page, each owning a distinct comment.
 

@@ -949,7 +949,7 @@ func TestSecretDetection_AllowComment_CSSBlockInline(t *testing.T) {
 	fake := newFakeGitHub()
 	fake.setGitRef(testOwner, testRepo, testBranch, testSHA)
 	fake.setGitTree(testOwner, testRepo, testSHA, []string{"style.css"})
-	fake.setFile(testOwner, testRepo, "style.css", []byte(`content: "sk_live_4eC39HqLyjWDarjtT1zdp7dc"; /* git-cascade:allow */`+"\n"))
+	fake.setFile(testOwner, testRepo, "style.css", []byte(`content: "sk_live_4eC39HqLyjWDarjtT1zdp7dc"; /* git-cascade:allow */`+"\n")) 
 
 	result := runSecretCheck(t, fake, baseRule("secret-detection"))
 	if result.Status != compliance.StatusPass {

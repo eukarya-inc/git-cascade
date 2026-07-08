@@ -61,14 +61,36 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 	})
 
 	// GET/POST /repos/{owner}/{repo}/issues/{number}/comments
+	// PATCH    /repos/{owner}/{repo}/issues/{number}
 	mux.HandleFunc("/api/v3/repos/o/r/issues/", func(w http.ResponseWriter, r *http.Request) {
 		rest := r.URL.Path[len("/api/v3/repos/o/r/issues/"):]
 		parts := splitPath(rest)
+		num, _ := strconv.Atoi(parts[0])
+
+		if len(parts) == 1 && r.Method == http.MethodPatch {
+			var req github.IssueRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			for _, issue := range f.issues {
+				if issue.GetNumber() == num {
+					if req.Title != nil {
+						issue.Title = req.Title
+					}
+					if req.Body != nil {
+						issue.Body = req.Body
+					}
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(issue)
+					return
+				}
+			}
+			http.NotFound(w, r)
+			return
+		}
+
 		if len(parts) < 2 || parts[1] != "comments" {
 			http.NotFound(w, r)
 			return
 		}
-		num, _ := strconv.Atoi(parts[0])
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -341,4 +363,51 @@ func TestPostAppendIssue_InvalidRepo(t *testing.T) {
 
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// — postConsolidatedIssue / postPerRepoIssues title override ————————————————————
+
+func TestPostConsolidatedIssue_DefaultTitle(t *testing.T) {
+	fake := newFakeIssuesAPI()
+	client := fake.serve(t)
+
+	cfg := config.IssuesConfig{Mode: "compliance", ComplianceRepo: "o/r"}
+	results := []compliance.Result{makeResult("o/myrepo", compliance.StatusFail, config.SeverityError, false)}
+
+	if _, err := postConsolidatedIssue(t.Context(), client, cfg, "myorg", results, "", config.Scope{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.issues) != 1 || fake.issues[0].GetTitle() != issueTitle {
+		t.Errorf("expected default title %q, got %+v", issueTitle, fake.issues)
+	}
+}
+
+func TestPostConsolidatedIssue_CustomTitle(t *testing.T) {
+	fake := newFakeIssuesAPI()
+	client := fake.serve(t)
+
+	cfg := config.IssuesConfig{Mode: "compliance", ComplianceRepo: "o/r", IssueTitle: "[Compliance] myorg findings"}
+	results := []compliance.Result{makeResult("o/myrepo", compliance.StatusFail, config.SeverityError, false)}
+
+	if _, err := postConsolidatedIssue(t.Context(), client, cfg, "myorg", results, "", config.Scope{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.issues) != 1 || fake.issues[0].GetTitle() != "[Compliance] myorg findings" {
+		t.Errorf("expected custom title, got %+v", fake.issues)
+	}
+}
+
+func TestPostPerRepoIssues_CustomTitle(t *testing.T) {
+	fake := newFakeIssuesAPI()
+	client := fake.serve(t)
+
+	cfg := config.IssuesConfig{Mode: "repo", IssueTitle: "[Compliance] myorg findings"}
+	results := []compliance.Result{makeResult("o/r", compliance.StatusFail, config.SeverityError, false)}
+
+	if err := postPerRepoIssues(t.Context(), client, cfg, results); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fake.issues) != 1 || fake.issues[0].GetTitle() != "[Compliance] myorg findings" {
+		t.Errorf("expected custom title, got %+v", fake.issues)
+	}
 }

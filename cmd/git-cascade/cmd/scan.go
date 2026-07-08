@@ -97,7 +97,7 @@ func init() {
 	f.StringVar(&scanFlags.issueMode, "issue-mode", "", "Post findings as GitHub Issues: compliance, repo, or append")
 	f.StringVar(&scanFlags.issueRepo, "issue-repo", "", "owner/repo for consolidated or shared issue (mode=compliance|append)")
 	f.StringVar(&scanFlags.issueHeader, "issue-header", "", "Override the issue body heading (mode=compliance, default: \"# Compliance Report — {org}\")")
-	f.StringVar(&scanFlags.issueTitle, "issue-title", "", "Title of the shared issue to upsert a comment on (mode=append, required)")
+	f.StringVar(&scanFlags.issueTitle, "issue-title", "", "Issue title (required for mode=append; overrides the default title for mode=compliance|repo)")
 	f.StringVar(&scanFlags.issueSectionKey, "issue-section-key", "", "Identifies this config's comment on a shared issue (mode=append, default: org)")
 	f.StringSliceVar(&scanFlags.issueLabels, "issue-label", nil, "Labels to apply to created issues (repeatable)")
 
