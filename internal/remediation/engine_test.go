@@ -16,12 +16,16 @@ type fakeRemediator struct {
 	calls   int
 	fix     *Fix
 	fixFunc func(result compliance.Result) *Fix
+	err     error
 }
 
 func (f *fakeRemediator) ID() string { return f.id }
 
 func (f *fakeRemediator) Remediate(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule, result compliance.Result) (*Fix, error) {
 	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
 	if f.fixFunc != nil {
 		return f.fixFunc(result), nil
 	}

@@ -18,6 +18,10 @@ func resetScanFlags() {
 	scanFlags.notifyAppID = 0
 	scanFlags.notifyInstallationID = 0
 	scanFlags.notifyPrivateKeyPath = ""
+	scanFlags.remediateToken = ""
+	scanFlags.remediateAppID = 0
+	scanFlags.remediateInstallationID = 0
+	scanFlags.remediatePrivateKeyPath = ""
 }
 
 // TestResolveCredentials_PATFlag verifies that a non-empty --token flag
@@ -184,6 +188,95 @@ func TestResolveCredentials_AppIDEnvInvalidFormat(t *testing.T) {
 	// Invalid app-id is ignored; falls back to PAT from env.
 	if creds.Token != "fallback_token" {
 		t.Errorf("expected fallback_token, got %q", creds.Token)
+	}
+}
+
+// — resolveRemediateCredentials ————————————————————————————————————————————————
+
+// TestResolveRemediateCredentials_ErrorsWhenUnset verifies that, unlike
+// notify credentials, remediate credentials never silently fall back to the
+// scan credentials — nothing set means a hard error.
+func TestResolveRemediateCredentials_ErrorsWhenUnset(t *testing.T) {
+	resetScanFlags()
+	t.Setenv("GIT_CASCADE_REMEDIATE_TOKEN", "")
+	t.Setenv("GIT_CASCADE_REMEDIATE_APP_ID", "")
+	t.Setenv("GIT_CASCADE_REMEDIATE_INSTALLATION_ID", "")
+	t.Setenv("GIT_CASCADE_REMEDIATE_PRIVATE_KEY_PATH", "")
+
+	_, err := resolveRemediateCredentials()
+	if err == nil {
+		t.Fatal("expected error when no --remediate-* credentials are supplied")
+	}
+	if !strings.Contains(err.Error(), "remediation.enabled") {
+		t.Errorf("expected error to explain the remediation gate, got: %v", err)
+	}
+}
+
+// TestResolveRemediateCredentials_PATFlag verifies --remediate-token is used
+// when supplied via flag.
+func TestResolveRemediateCredentials_PATFlag(t *testing.T) {
+	resetScanFlags()
+	scanFlags.remediateToken = "remediate_token"
+
+	creds, err := resolveRemediateCredentials()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Method != gh.AuthPAT || creds.Token != "remediate_token" {
+		t.Errorf("expected remediate_token, got %+v", creds)
+	}
+}
+
+// TestResolveRemediateCredentials_PATEnv verifies GIT_CASCADE_REMEDIATE_TOKEN
+// is picked up when no flag is set.
+func TestResolveRemediateCredentials_PATEnv(t *testing.T) {
+	resetScanFlags()
+	t.Setenv("GIT_CASCADE_REMEDIATE_TOKEN", "remediate_env_token")
+
+	creds, err := resolveRemediateCredentials()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Token != "remediate_env_token" {
+		t.Errorf("expected remediate_env_token, got %q", creds.Token)
+	}
+}
+
+// TestResolveRemediateCredentials_AppFlags verifies a full GitHub App
+// identity can be supplied for remediation independent of scan/notify.
+func TestResolveRemediateCredentials_AppFlags(t *testing.T) {
+	resetScanFlags()
+	scanFlags.remediateAppID = 111
+	scanFlags.remediateInstallationID = 222
+	scanFlags.remediatePrivateKeyPath = "/tmp/remediate-key.pem"
+
+	creds, err := resolveRemediateCredentials()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Method != gh.AuthGitHubApp {
+		t.Errorf("expected AuthGitHubApp, got %v", creds.Method)
+	}
+	if creds.AppID != 111 || creds.InstallationID != 222 || creds.PrivateKeyPath != "/tmp/remediate-key.pem" {
+		t.Errorf("expected remediate App identity, got %+v", creds)
+	}
+}
+
+// TestResolveRemediateCredentials_PartialAppFlagsError verifies an
+// incomplete --remediate-* App identity surfaces an error naming the
+// --remediate- flags.
+func TestResolveRemediateCredentials_PartialAppFlagsError(t *testing.T) {
+	resetScanFlags()
+	scanFlags.remediateAppID = 111
+	scanFlags.remediatePrivateKeyPath = "/tmp/remediate-key.pem"
+	// remediateInstallationID left 0
+
+	_, err := resolveRemediateCredentials()
+	if err == nil {
+		t.Fatal("expected error for incomplete remediate App credentials")
+	}
+	if !strings.Contains(err.Error(), "--remediate-") {
+		t.Errorf("expected error to reference --remediate- flags, got: %v", err)
 	}
 }
 
