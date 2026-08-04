@@ -37,7 +37,7 @@ func Run(ctx context.Context, client *github.Client, cfg config.RemediationConfi
 			continue
 		}
 		rule, ok := rules[result.RuleID]
-		if !ok || !config.EffectiveAutoRemediation(rule, cfg) {
+		if !ok || !config.EffectiveAutoRemediation(rule) {
 			continue
 		}
 		remediator := Get(result.RuleID)

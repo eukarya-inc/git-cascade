@@ -2,21 +2,19 @@ package config
 
 import "testing"
 
-func TestEffectiveAutoRemediation_RulePrecedesGlobalDefault(t *testing.T) {
+func TestEffectiveAutoRemediation(t *testing.T) {
 	cases := []struct {
-		name        string
-		rule        Rule
-		remediation RemediationConfig
-		want        bool
+		name string
+		rule Rule
+		want bool
 	}{
-		{"rule true overrides global false", Rule{AutoRemediation: boolPtr(true)}, RemediationConfig{AutoRemediation: boolPtr(false)}, true},
-		{"rule false overrides global true", Rule{AutoRemediation: boolPtr(false)}, RemediationConfig{AutoRemediation: boolPtr(true)}, false},
-		{"unset rule falls back to global true", Rule{}, RemediationConfig{AutoRemediation: boolPtr(true)}, true},
-		{"unset rule and global defaults to false", Rule{}, RemediationConfig{}, false},
+		{"rule true", Rule{AutoRemediation: boolPtr(true)}, true},
+		{"rule false", Rule{AutoRemediation: boolPtr(false)}, false},
+		{"unset rule defaults to false", Rule{}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := EffectiveAutoRemediation(c.rule, c.remediation)
+			got := EffectiveAutoRemediation(c.rule)
 			if got != c.want {
 				t.Errorf("got %v, want %v", got, c.want)
 			}
@@ -29,7 +27,6 @@ func TestParseWithRemediation(t *testing.T) {
 version: "1"
 remediation:
   enabled: true
-  auto_remediation: true
   branch_prefix: "custom/fix"
   commit_author:
     name: bot
@@ -43,7 +40,7 @@ rules:
     description: test
     severity: error
     enabled: true
-    auto_remediation: false
+    auto_remediation: true
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -52,9 +49,6 @@ rules:
 
 	if !cfg.Remediation.Enabled {
 		t.Error("expected remediation.enabled=true")
-	}
-	if cfg.Remediation.AutoRemediation == nil || !*cfg.Remediation.AutoRemediation {
-		t.Error("expected remediation.auto_remediation=true")
 	}
 	if cfg.Remediation.BranchPrefix != "custom/fix" {
 		t.Errorf("got branch_prefix=%q", cfg.Remediation.BranchPrefix)
@@ -70,10 +64,35 @@ rules:
 	}
 
 	rule := cfg.Rules[0]
-	if rule.AutoRemediation == nil || *rule.AutoRemediation != false {
-		t.Error("expected rule.auto_remediation=false")
+	if rule.AutoRemediation == nil || !*rule.AutoRemediation {
+		t.Error("expected rule.auto_remediation=true")
 	}
-	if EffectiveAutoRemediation(rule, cfg.Remediation) != false {
-		t.Error("rule-level auto_remediation=false should win over remediation.auto_remediation=true")
+	if !EffectiveAutoRemediation(rule) {
+		t.Error("expected EffectiveAutoRemediation to be true for this rule")
+	}
+}
+
+func TestParseWithRemediation_RuleOptOutDefaultsFalse(t *testing.T) {
+	yaml := `
+version: "1"
+remediation:
+  enabled: true
+rules:
+  - id: actions-pinned
+    name: Actions Pinned
+    description: test
+    severity: error
+    enabled: true
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rule := cfg.Rules[0]
+	if rule.AutoRemediation != nil {
+		t.Errorf("expected auto_remediation to be unset, got %v", *rule.AutoRemediation)
+	}
+	if EffectiveAutoRemediation(rule) {
+		t.Error("a rule with no auto_remediation field should default to false even when remediation.enabled is true")
 	}
 }

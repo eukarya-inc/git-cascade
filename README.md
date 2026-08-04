@@ -313,8 +313,7 @@ notify:
       - automated
 
 remediation:
-  enabled: false          # master switch — nothing runs unless true, regardless of any rule's auto_remediation
-  auto_remediation: false # default for rules that don't set their own auto_remediation field; a rule-level setting always wins
+  enabled: false          # master switch — nothing runs unless true. Each rule opts in individually via its own auto_remediation field.
   branch_prefix: "git-cascade/fix"  # branch = {branch_prefix}/{rule-id}
   commit_author:
     name: "git-cascade"
@@ -792,17 +791,16 @@ For rules where the fix is a mechanical, deterministic file edit, git-cascade ca
 Auto-remediation is off by default and gated at two levels:
 
 1. **`remediation.enabled`** — the master switch. Nothing runs unless this is `true`.
-2. **`auto_remediation`** — whether a *given rule* should be remediated. Set it per-rule (`rules[].auto_remediation`) to opt in/out individually, or set `remediation.auto_remediation` as the default for rules that don't set their own. A rule-level setting always wins over the default.
+2. **`auto_remediation`** — whether a *given rule* should be remediated, set per-rule (`rules[].auto_remediation`). There is no block-level default: each rule opts in individually, so a newly registered fixer never goes live silently just because remediation as a whole is already turned on.
 
 ```yaml
 remediation:
   enabled: true
-  auto_remediation: false   # rules must opt in individually unless they set their own value
 
 rules:
   - id: actions-pinned
     enabled: true
-    auto_remediation: true  # this rule opts in even though the block default is false
+    auto_remediation: true  # this rule opts in explicitly
 ```
 
 Currently supported rules:

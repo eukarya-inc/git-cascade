@@ -104,16 +104,17 @@ type IssuesConfig struct {
 
 // RemediationConfig configures auto-remediation: opening pull requests that
 // fix certain rule violations automatically. Enabled is the master switch —
-// nothing runs unless it is true, regardless of any rule's auto_remediation
-// setting. AutoRemediation is the default applied to rules that don't set
-// their own auto_remediation field; a rule-level setting always wins.
+// nothing runs unless it is true. There is deliberately no block-level
+// default for which rules participate: each rule opts in individually via
+// its own auto_remediation field (see EffectiveAutoRemediation), so a newly
+// registered fixer never goes live silently just because remediation as a
+// whole was already turned on.
 type RemediationConfig struct {
-	Enabled         bool               `yaml:"enabled,omitempty"`
-	AutoRemediation *bool              `yaml:"auto_remediation,omitempty"`
-	BranchPrefix    string             `yaml:"branch_prefix,omitempty"`
-	CommitAuthor    CommitAuthorConfig `yaml:"commit_author,omitempty"`
-	PRLabels        []string           `yaml:"pr_labels,omitempty"`
-	DraftPR         bool               `yaml:"draft_pr,omitempty"`
+	Enabled      bool               `yaml:"enabled,omitempty"`
+	BranchPrefix string             `yaml:"branch_prefix,omitempty"`
+	CommitAuthor CommitAuthorConfig `yaml:"commit_author,omitempty"`
+	PRLabels     []string           `yaml:"pr_labels,omitempty"`
+	DraftPR      bool               `yaml:"draft_pr,omitempty"`
 }
 
 // CommitAuthorConfig sets the author/committer identity for remediation commits.
@@ -122,16 +123,12 @@ type CommitAuthorConfig struct {
 	Email string `yaml:"email,omitempty"`
 }
 
-// EffectiveAutoRemediation resolves whether auto-remediation should run for a
-// rule: rule.AutoRemediation wins when set, otherwise the remediation block's
-// AutoRemediation default is used, otherwise false. This does NOT check
+// EffectiveAutoRemediation reports whether a rule has opted in to
+// auto-remediation (defaults to false when unset). This does NOT check
 // RemediationConfig.Enabled — callers must check that separately as the
 // overall gate.
-func EffectiveAutoRemediation(rule Rule, remediation RemediationConfig) bool {
-	if rule.AutoRemediation != nil {
-		return *rule.AutoRemediation
-	}
-	return BoolDefault(remediation.AutoRemediation, false)
+func EffectiveAutoRemediation(rule Rule) bool {
+	return BoolDefault(rule.AutoRemediation, false)
 }
 
 // Scope defines which repositories are targeted by the compliance scan.

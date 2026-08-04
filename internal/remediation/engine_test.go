@@ -57,9 +57,27 @@ func TestRun_SkipsRuleWithAutoRemediationDisabled(t *testing.T) {
 	results := []compliance.Result{{RuleID: "test-rule", Repo: "o/r", Status: compliance.StatusFail}}
 	repos := map[string]gh.Repository{"o/r": {Owner: "o", Name: "r", FullName: "o/r"}}
 
-	Run(context.Background(), nil, config.RemediationConfig{Enabled: true, AutoRemediation: boolPtr(true)}, results, rules, repos, slog.Default())
+	Run(context.Background(), nil, config.RemediationConfig{Enabled: true}, results, rules, repos, slog.Default())
 	if r.calls != 0 {
-		t.Errorf("rule-level auto_remediation=false should win over remediation default, got %d calls", r.calls)
+		t.Errorf("rule-level auto_remediation=false should be honored, got %d calls", r.calls)
+	}
+}
+
+func TestRun_SkipsRuleWithNoAutoRemediationField(t *testing.T) {
+	r := &fakeRemediator{id: "test-rule"}
+	Register(r)
+	defer delete(registry, "test-rule")
+
+	// No auto_remediation field at all — must default to false even though
+	// remediation.enabled is true. There is no block-level default to fall
+	// back to; each rule must opt in explicitly.
+	rules := map[string]config.Rule{"test-rule": {ID: "test-rule"}}
+	results := []compliance.Result{{RuleID: "test-rule", Repo: "o/r", Status: compliance.StatusFail}}
+	repos := map[string]gh.Repository{"o/r": {Owner: "o", Name: "r", FullName: "o/r"}}
+
+	Run(context.Background(), nil, config.RemediationConfig{Enabled: true}, results, rules, repos, slog.Default())
+	if r.calls != 0 {
+		t.Errorf("a rule with no auto_remediation field should not be remediated, got %d calls", r.calls)
 	}
 }
 
