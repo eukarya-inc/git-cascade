@@ -10,11 +10,12 @@ import (
 
 // ComplianceConfig is the top-level configuration loaded from YAML.
 type ComplianceConfig struct {
-	Version      string   `yaml:"version"`
-	Scope        Scope    `yaml:"scope,omitempty"`
-	Output       Output   `yaml:"output,omitempty"`
-	Notify       Notify   `yaml:"notify,omitempty"`
-	Rules        []Rule   `yaml:"rules"`
+	Version     string            `yaml:"version"`
+	Scope       Scope             `yaml:"scope,omitempty"`
+	Output      Output            `yaml:"output,omitempty"`
+	Notify      Notify            `yaml:"notify,omitempty"`
+	Remediation RemediationConfig `yaml:"remediation,omitempty"`
+	Rules       []Rule            `yaml:"rules"`
 	// IncludeRules, when non-empty, restricts the scan to only rules whose IDs
 	// match at least one glob pattern. ExcludeRules is ignored when this is set.
 	IncludeRules []string `yaml:"include_rules,omitempty"`
@@ -101,6 +102,38 @@ type IssuesConfig struct {
 	Labels []string `yaml:"labels,omitempty"`
 }
 
+// RemediationConfig configures auto-remediation: opening pull requests that
+// fix certain rule violations automatically. Enabled is the master switch —
+// nothing runs unless it is true, regardless of any rule's auto_remediation
+// setting. AutoRemediation is the default applied to rules that don't set
+// their own auto_remediation field; a rule-level setting always wins.
+type RemediationConfig struct {
+	Enabled         bool               `yaml:"enabled,omitempty"`
+	AutoRemediation *bool              `yaml:"auto_remediation,omitempty"`
+	BranchPrefix    string             `yaml:"branch_prefix,omitempty"`
+	CommitAuthor    CommitAuthorConfig `yaml:"commit_author,omitempty"`
+	PRLabels        []string           `yaml:"pr_labels,omitempty"`
+	DraftPR         bool               `yaml:"draft_pr,omitempty"`
+}
+
+// CommitAuthorConfig sets the author/committer identity for remediation commits.
+type CommitAuthorConfig struct {
+	Name  string `yaml:"name,omitempty"`
+	Email string `yaml:"email,omitempty"`
+}
+
+// EffectiveAutoRemediation resolves whether auto-remediation should run for a
+// rule: rule.AutoRemediation wins when set, otherwise the remediation block's
+// AutoRemediation default is used, otherwise false. This does NOT check
+// RemediationConfig.Enabled — callers must check that separately as the
+// overall gate.
+func EffectiveAutoRemediation(rule Rule, remediation RemediationConfig) bool {
+	if rule.AutoRemediation != nil {
+		return *rule.AutoRemediation
+	}
+	return BoolDefault(remediation.AutoRemediation, false)
+}
+
 // Scope defines which repositories are targeted by the compliance scan.
 // When omitted, defaults to scanning all public and private repos, excluding archived and forked.
 type Scope struct {
@@ -114,17 +147,20 @@ type Scope struct {
 
 // Rule defines a single compliance check.
 type Rule struct {
-	ID          string                       `yaml:"id"`
-	Name        string                       `yaml:"name"`
-	Description string                       `yaml:"description"`
-	Severity    Severity                     `yaml:"severity"`
-	Enabled     bool                         `yaml:"enabled"`
+	ID          string   `yaml:"id"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Severity    Severity `yaml:"severity"`
+	Enabled     bool     `yaml:"enabled"`
 	// Scope, when set, overrides the top-level scope for this rule only.
 	// Only include_repos and exclude_repos are honoured at the rule level;
 	// boolean visibility flags (include_public, include_private, etc.) are ignored.
-	Scope       *RuleScope                   `yaml:"scope,omitempty"`
-	Params      map[string]string            `yaml:"params,omitempty"`
-	ListParams  map[string][]string          `yaml:"-"`
+	Scope *RuleScope `yaml:"scope,omitempty"`
+	// AutoRemediation, when set, overrides remediation.auto_remediation for
+	// this rule only. See EffectiveAutoRemediation.
+	AutoRemediation *bool               `yaml:"auto_remediation,omitempty"`
+	Params          map[string]string   `yaml:"params,omitempty"`
+	ListParams      map[string][]string `yaml:"-"`
 	// MapListParams holds params whose value is a mapping of string → []string.
 	// Example: additional_branches: {development: [org/repo1, org/repo2]}.
 	MapListParams map[string]map[string][]string `yaml:"-"`
@@ -144,12 +180,13 @@ type RuleScope struct {
 func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
 	// Use an alias type to avoid infinite recursion when calling Decode.
 	type ruleAlias struct {
-		ID          string     `yaml:"id"`
-		Name        string     `yaml:"name"`
-		Description string     `yaml:"description"`
-		Severity    Severity   `yaml:"severity"`
-		Enabled     bool       `yaml:"enabled"`
-		Scope       *RuleScope `yaml:"scope,omitempty"`
+		ID              string     `yaml:"id"`
+		Name            string     `yaml:"name"`
+		Description     string     `yaml:"description"`
+		Severity        Severity   `yaml:"severity"`
+		Enabled         bool       `yaml:"enabled"`
+		Scope           *RuleScope `yaml:"scope,omitempty"`
+		AutoRemediation *bool      `yaml:"auto_remediation,omitempty"`
 	}
 	var alias ruleAlias
 	if err := value.Decode(&alias); err != nil {
@@ -161,6 +198,7 @@ func (r *Rule) UnmarshalYAML(value *yaml.Node) error {
 	r.Severity = alias.Severity
 	r.Enabled = alias.Enabled
 	r.Scope = alias.Scope
+	r.AutoRemediation = alias.AutoRemediation
 
 	// Find the params mapping node.
 	for i := 0; i+1 < len(value.Content); i += 2 {
@@ -316,6 +354,9 @@ func LoadAll(dir string) (*ComplianceConfig, error) {
 		}
 		if !merged.Notify.Issues.Enabled {
 			merged.Notify.Issues = cfg.Notify.Issues
+		}
+		if !merged.Remediation.Enabled {
+			merged.Remediation = cfg.Remediation
 		}
 		merged.Rules = append(merged.Rules, cfg.Rules...)
 	}

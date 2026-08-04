@@ -4,6 +4,19 @@ import (
 	"testing"
 )
 
+// jobNames extracts job names from FindJobsMissingHardenRunner's result, for
+// tests written against the pre-refactor []string return shape.
+func jobNames(missing []MissingHardenRunnerJob) []string {
+	if missing == nil {
+		return nil
+	}
+	names := make([]string, len(missing))
+	for i, m := range missing {
+		names[i] = m.Job
+	}
+	return names
+}
+
 // — hasPullRequestTarget ——————————————————————————————————————————————————————
 
 func TestHasPullRequestTarget(t *testing.T) {
@@ -323,7 +336,7 @@ jobs:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := jobsMissingHardenRunner(tt.content)
+			got := jobNames(FindJobsMissingHardenRunner(tt.content))
 			if len(got) == 0 && len(tt.want) == 0 {
 				return
 			}
@@ -372,7 +385,7 @@ jobs:
       # - uses: some/other-action@old
       - uses: actions/checkout@abc123
 `
-	missing := jobsMissingHardenRunner(content)
+	missing := jobNames(FindJobsMissingHardenRunner(content))
 	if len(missing) != 0 {
 		t.Errorf("expected no missing jobs, got %v", missing)
 	}
@@ -390,7 +403,7 @@ jobs:
 permissions:
   contents: read
 `
-	missing := jobsMissingHardenRunner(content)
+	missing := jobNames(FindJobsMissingHardenRunner(content))
 	if len(missing) != 1 || missing[0] != "build" {
 		t.Errorf("expected [build] missing, got %v", missing)
 	}

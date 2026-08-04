@@ -14,6 +14,7 @@ rules:
     description: CI workflows must use locked install commands (npm ci, pnpm install --frozen-lockfile, yarn install --immutable) instead of bare install commands
     severity: warning
     enabled: true
+    # auto_remediation: true  # opens a PR locking bare install commands (requires remediation.enabled: true)
     # scope:
     #   exclude_repos:
     #     - sandbox-*

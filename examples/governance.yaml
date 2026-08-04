@@ -30,6 +30,7 @@ rules:
     description: Repository must contain a README file
     severity: warning
     enabled: true
+    # auto_remediation: true  # opens a PR adding a minimal README.md stub (requires remediation.enabled: true)
     # scope:
     #   exclude_repos:
     #     - sandbox-*

@@ -214,6 +214,37 @@ func hasYarnInstallViolation(line string) bool {
 	return isYarnInstallLine(line) && !yarnLockedPattern.MatchString(line)
 }
 
+// NodeInstallViolation is a single non-locked install command line found by
+// FindNodeInstallViolations.
+type NodeInstallViolation struct {
+	Line int    // 0-based index into the content's lines
+	Kind string // "npm", "pnpm", or "yarn"
+}
+
+// FindNodeInstallViolations scans workflow content and returns every
+// non-locked install command line (unlike scanWorkflow, which the checker
+// uses and which only reports the first violation reason per file). Exported
+// so the npm-ci-required remediator can fix every offending line, not just
+// report on the first one.
+func FindNodeInstallViolations(content string) []NodeInstallViolation {
+	lines := strings.Split(content, "\n")
+	var found []NodeInstallViolation
+	for i, line := range lines {
+		if !isNodeInstallLine(line) || hasAllowComment(lines, i) {
+			continue
+		}
+		switch {
+		case hasNpmInstallViolation(line):
+			found = append(found, NodeInstallViolation{Line: i, Kind: "npm"})
+		case hasPnpmInstallViolation(line):
+			found = append(found, NodeInstallViolation{Line: i, Kind: "pnpm"})
+		case hasYarnInstallViolation(line):
+			found = append(found, NodeInstallViolation{Line: i, Kind: "yarn"})
+		}
+	}
+	return found
+}
+
 func init() {
 	compliance.Register(&nodejsInstallLockChecker{})
 }

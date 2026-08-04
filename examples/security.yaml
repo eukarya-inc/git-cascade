@@ -4,6 +4,7 @@ rules:
     description: All GitHub Actions in workflows must use pinned SHA references instead of tags
     severity: error
     enabled: true
+    # auto_remediation: true  # opens a PR resolving unpinned tags to a commit SHA (requires remediation.enabled: true)
     # scope:
     #   exclude_repos:
     #     - testing
@@ -60,6 +61,7 @@ rules:
     description: Every job in public repository workflows must use step-security/harden-runner as the first step
     severity: warning
     enabled: true
+    # auto_remediation: true  # opens a PR inserting harden-runner as each job's first step (requires remediation.enabled: true)
     # scope:
     #   exclude_repos:
     #     - testing

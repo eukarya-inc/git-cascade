@@ -75,6 +75,9 @@ func LoadConfigFromRepo(ctx context.Context, client *github.Client, owner, repo,
 		if !merged.Notify.Issues.Enabled {
 			merged.Notify.Issues = cfg.Notify.Issues
 		}
+		if !merged.Remediation.Enabled {
+			merged.Remediation = cfg.Remediation
+		}
 		merged.Rules = append(merged.Rules, cfg.Rules...)
 	}
 
