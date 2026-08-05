@@ -10,7 +10,7 @@ import (
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // fakeIssuesAPI is a minimal in-memory GitHub Issues API used to exercise the
@@ -42,13 +42,13 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(f.issues)
 		case http.MethodPost:
-			var req github.IssueRequest
+			var req github.CreateIssueRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			num := int(f.nextIssueID)
 			f.nextIssueID++
 			issue := &github.Issue{
 				Number:  &num,
-				Title:   req.Title,
+				Title:   &req.Title,
 				Body:    req.Body,
 				HTMLURL: github.Ptr("https://github.com/o/r/issues/" + strconv.Itoa(num)),
 			}
@@ -68,7 +68,7 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 		num, _ := strconv.Atoi(parts[0])
 
 		if len(parts) == 1 && r.Method == http.MethodPatch {
-			var req github.IssueRequest
+			var req github.UpdateIssueRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			for _, issue := range f.issues {
 				if issue.GetNumber() == num {
@@ -131,9 +131,8 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := github.NewClient(nil)
 	baseURL := srv.URL + "/api/v3/"
-	client, _ = client.WithEnterpriseURLs(baseURL, baseURL)
+	client, _ := github.NewClient(github.WithEnterpriseURLs(baseURL, baseURL))
 	return client
 }
 
@@ -178,6 +177,29 @@ func TestFindOrCreateIssueByTitle_CreatesWhenMissing(t *testing.T) {
 	}
 	if len(fake.issues) != 1 || fake.issues[0].GetTitle() != "Integrated Findings" {
 		t.Errorf("expected one created issue titled 'Integrated Findings', got %+v", fake.issues)
+	}
+}
+
+func TestFindOrCreateIssueByTitle_CreateFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]*github.Issue{})
+		case http.MethodPost:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	baseURL := srv.URL + "/api/v3/"
+	client, _ := github.NewClient(github.WithEnterpriseURLs(baseURL, baseURL))
+
+	if _, _, err := findOrCreateIssueByTitle(t.Context(), client, "o", "r", "Integrated Findings", nil); err == nil {
+		t.Error("expected error when issue creation fails")
 	}
 }
 

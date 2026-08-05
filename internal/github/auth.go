@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // AuthMethod represents the authentication strategy.
@@ -52,7 +52,7 @@ func newPATClient(token string) (*github.Client, error) {
 	if token == "" {
 		return nil, fmt.Errorf("PAT token is required")
 	}
-	return github.NewClient(nil).WithAuthToken(token), nil
+	return github.NewClient(github.WithAuthToken(token))
 }
 
 func newAppClient(appID, installationID int64, privateKeyPath string) (*github.Client, error) {
@@ -73,7 +73,7 @@ func newAppClient(appID, installationID int64, privateKeyPath string) (*github.C
 	}
 
 	httpClient := &http.Client{Transport: transport}
-	return github.NewClient(httpClient), nil
+	return github.NewClient(github.WithHTTPClient(httpClient))
 }
 
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
@@ -175,7 +175,10 @@ func (t *appTransport) getInstallationToken(ctx context.Context) (string, error)
 		return "", err
 	}
 
-	client := github.NewClient(&http.Client{Transport: t.base}).WithAuthToken(jwtToken)
+	client, err := github.NewClient(github.WithHTTPClient(&http.Client{Transport: t.base}), github.WithAuthToken(jwtToken))
+	if err != nil {
+		return "", fmt.Errorf("creating client for installation token: %w", err)
+	}
 	tok, _, err := client.Apps.CreateInstallationToken(
 		ctx, t.installationID, nil,
 	)

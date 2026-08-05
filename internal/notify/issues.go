@@ -10,7 +10,7 @@ import (
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 const issueTitle = "[COMPLIANCE] non-compliant item findings"
@@ -240,10 +240,10 @@ func findOrCreateIssueByTitle(ctx context.Context, client *github.Client, owner,
 		labels = []string{}
 	}
 	body := "Integrated findings issue, shared across scanning tools.\n"
-	issue, _, err := client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
-		Title:  &title,
+	issue, _, err := client.Issues.Create(ctx, owner, repo, github.CreateIssueRequest{
+		Title:  title,
 		Body:   &body,
-		Labels: &labels,
+		Labels: labels,
 	})
 	if err != nil {
 		return 0, "", fmt.Errorf("creating shared issue in %s/%s: %w", owner, repo, err)
@@ -443,7 +443,7 @@ func upsertIssue(ctx context.Context, client *github.Client, owner, repo, title,
 
 	if existing != nil {
 		n := existing.GetNumber()
-		_, _, err = client.Issues.Edit(ctx, owner, repo, n, &github.IssueRequest{Body: &body})
+		_, _, err = client.Issues.Update(ctx, owner, repo, n, github.UpdateIssueRequest{Body: &body})
 		if err != nil {
 			return 0, "", fmt.Errorf("updating issue #%d in %s/%s: %w", n, owner, repo, err)
 		}
@@ -453,10 +453,10 @@ func upsertIssue(ctx context.Context, client *github.Client, owner, repo, title,
 	if labels == nil {
 		labels = []string{}
 	}
-	issue, _, err := client.Issues.Create(ctx, owner, repo, &github.IssueRequest{
-		Title:  &title,
+	issue, _, err := client.Issues.Create(ctx, owner, repo, github.CreateIssueRequest{
+		Title:  title,
 		Body:   &body,
-		Labels: &labels,
+		Labels: labels,
 	})
 	if err != nil {
 		return 0, "", fmt.Errorf("creating issue in %s/%s: %w", owner, repo, err)

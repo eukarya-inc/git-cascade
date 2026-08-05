@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // Repository is a minimal representation of a GitHub repository.
@@ -134,7 +134,7 @@ func ListDirectoryContents(ctx context.Context, client *github.Client, owner, re
 // Rate limit errors are retried after waiting for the reset window.
 func GetBranchRules(ctx context.Context, client *github.Client, owner, repo, branch string) (*github.BranchRules, int, error) {
 	for {
-		rules, resp, err := client.Repositories.GetRulesForBranch(ctx, owner, repo, branch, nil)
+		rules, resp, err := client.Repositories.ListRulesForBranch(ctx, owner, repo, branch, nil)
 		if err != nil {
 			if waitForRateLimit(ctx, err) {
 				continue

@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // fetchFirstExisting probes all paths concurrently and returns the first path
