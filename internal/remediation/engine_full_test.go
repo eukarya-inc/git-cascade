@@ -147,7 +147,7 @@ func TestRun_UsesCustomBranchPrefix(t *testing.T) {
 	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/refs", func(w http.ResponseWriter, r *http.Request) {
 		// EnsureBranch creates the branch; remediateOne stops here for this
-		// test since CommitFiles' subsequent GetRef isn't mocked to succeed.
+		// test since CommitFiles' subsequent GetCommit isn't mocked to succeed.
 		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/" + branch), Object: &github.GitObject{SHA: github.Ptr("base1")}})
 	})
 	client := newTestClient(t, mux)

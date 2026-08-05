@@ -81,7 +81,8 @@ func remediateOne(ctx context.Context, client *github.Client, cfg config.Remedia
 	if baseSHA == "" {
 		return "", fmt.Errorf("default branch %s not found", repo.DefaultBranch)
 	}
-	if err := gh.EnsureBranch(ctx, client, repo.Owner, repo.Name, branch, baseSHA); err != nil {
+	headSHA, err := gh.EnsureBranch(ctx, client, repo.Owner, repo.Name, branch, baseSHA)
+	if err != nil {
 		return "", fmt.Errorf("ensuring branch: %w", err)
 	}
 
@@ -100,7 +101,7 @@ func remediateOne(ctx context.Context, client *github.Client, cfg config.Remedia
 	for i, f := range fix.Files {
 		files[i] = gh.FileWrite{Path: f.Path, Content: f.Content}
 	}
-	newSHA, err := gh.CommitFiles(ctx, client, repo.Owner, repo.Name, branch, fix.CommitMessage, author, files)
+	newSHA, err := gh.CommitFiles(ctx, client, repo.Owner, repo.Name, branch, headSHA, fix.CommitMessage, author, files)
 	if err != nil {
 		return "", fmt.Errorf("committing fix: %w", err)
 	}

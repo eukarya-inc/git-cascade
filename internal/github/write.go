@@ -16,35 +16,33 @@ type FileWrite struct {
 // EnsureBranch creates newBranch pointing at fromSHA if it doesn't already
 // exist. If it exists, it is left as-is — a prior remediation run may have
 // already committed to it, and repeated scans should update that same
-// branch/PR rather than reset its history.
-func EnsureBranch(ctx context.Context, client *github.Client, owner, repo, newBranch, fromSHA string) error {
-	_, resp, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+newBranch)
+// branch/PR rather than reset its history. Returns the branch's resulting
+// head SHA, for the caller to pass into CommitFiles — GitHub's Data API has
+// read-after-write lag on freshly created refs, so a caller that immediately
+// re-fetches a just-created ref can see a spurious 404.
+func EnsureBranch(ctx context.Context, client *github.Client, owner, repo, newBranch, fromSHA string) (string, error) {
+	ref, resp, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+newBranch)
 	if err == nil {
-		return nil
+		return ref.GetObject().GetSHA(), nil
 	}
 	if resp == nil || resp.StatusCode != 404 {
-		return fmt.Errorf("checking branch %s: %w", newBranch, err)
+		return "", fmt.Errorf("checking branch %s: %w", newBranch, err)
 	}
 	if _, _, err := client.Git.CreateRef(ctx, owner, repo, github.CreateRef{
 		Ref: "refs/heads/" + newBranch,
 		SHA: fromSHA,
 	}); err != nil {
-		return fmt.Errorf("creating branch %s: %w", newBranch, err)
+		return "", fmt.Errorf("creating branch %s: %w", newBranch, err)
 	}
-	return nil
+	return fromSHA, nil
 }
 
-// CommitFiles creates blobs for each file, a single tree layered on the
-// branch's current head tree, one commit, and fast-forwards the branch ref to
-// it. Returns the new commit SHA, or "" if the resulting tree is identical to
-// the branch's current tree (nothing to commit).
-func CommitFiles(ctx context.Context, client *github.Client, owner, repo, branch, message string, author *github.CommitAuthor, files []FileWrite) (string, error) {
-	ref, _, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+branch)
-	if err != nil {
-		return "", fmt.Errorf("fetching branch %s: %w", branch, err)
-	}
-	headSHA := ref.GetObject().GetSHA()
-
+// CommitFiles creates blobs for each file, a single tree layered on
+// headSHA's tree, one commit, and fast-forwards branch to it. headSHA is the
+// branch's current head commit SHA, as returned by EnsureBranch. Returns the
+// new commit SHA, or "" if the resulting tree is identical to the current
+// tree (nothing to commit).
+func CommitFiles(ctx context.Context, client *github.Client, owner, repo, branch, headSHA, message string, author *github.CommitAuthor, files []FileWrite) (string, error) {
 	headCommit, _, err := client.Git.GetCommit(ctx, owner, repo, headSHA)
 	if err != nil {
 		return "", fmt.Errorf("fetching head commit: %w", err)
