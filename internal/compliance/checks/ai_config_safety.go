@@ -9,7 +9,7 @@ import (
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // aiConfigPaths are files/directories to inspect for executable hooks.

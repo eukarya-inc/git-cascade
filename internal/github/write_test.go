@@ -8,15 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 func newTestClient(t *testing.T, mux *http.ServeMux) *github.Client {
 	t.Helper()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	client := github.NewClient(nil).WithAuthToken("fake-token")
-	client, _ = client.WithEnterpriseURLs(srv.URL+"/", srv.URL+"/")
+	client, _ := github.NewClient(github.WithAuthToken("fake-token"), github.WithEnterpriseURLs(srv.URL+"/", srv.URL+"/"))
 	return client
 }
 

@@ -11,7 +11,7 @@ import (
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // — branchRulesActive —————————————————————————————————————————————————————————
@@ -229,9 +229,8 @@ func (b *branchProtectionServer) serve(t *testing.T) (*httptest.Server, *github.
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := github.NewClient(nil).WithAuthToken("fake-token")
 	baseURL := srv.URL + "/"
-	client, _ = client.WithEnterpriseURLs(baseURL, baseURL)
+	client, _ := github.NewClient(github.WithAuthToken("fake-token"), github.WithEnterpriseURLs(baseURL, baseURL))
 	return srv, client
 }
 
@@ -614,8 +613,7 @@ func TestCheck_403OnBothAPIs_Skips(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	client := github.NewClient(nil).WithAuthToken("fake-token")
-	client, _ = client.WithEnterpriseURLs(srv.URL+"/", srv.URL+"/")
+	client, _ := github.NewClient(github.WithAuthToken("fake-token"), github.WithEnterpriseURLs(srv.URL+"/", srv.URL+"/"))
 
 	checker := &branchProtectionChecker{}
 	repo := repoWithDefault("main")

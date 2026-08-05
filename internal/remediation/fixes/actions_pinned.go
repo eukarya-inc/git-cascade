@@ -10,7 +10,7 @@ import (
 	"github.com/eukarya-inc/git-cascade/internal/config"
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
 	"github.com/eukarya-inc/git-cascade/internal/remediation"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 type actionsPinnedFixer struct{}

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // newCollabServer creates a minimal httptest.Server that serves
@@ -49,9 +49,8 @@ func newCollabServer(t *testing.T, statusCode int, users []map[string]any) (*htt
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := github.NewClient(nil).WithAuthToken("fake-token")
 	baseURL := srv.URL + "/"
-	client, _ = client.WithEnterpriseURLs(baseURL, baseURL)
+	client, _ := github.NewClient(github.WithAuthToken("fake-token"), github.WithEnterpriseURLs(baseURL, baseURL))
 	return srv, client
 }
 

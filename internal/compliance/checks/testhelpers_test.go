@@ -11,7 +11,7 @@ import (
 	"path"
 	"testing"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // fakeGitHub holds per-path responses for the GitHub contents and archive APIs.
@@ -115,9 +115,8 @@ func (f *fakeGitHub) serve(t *testing.T) (*httptest.Server, *github.Client) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := github.NewClient(nil).WithAuthToken("fake-token")
 	baseURL := srv.URL + "/"
-	client, _ = client.WithEnterpriseURLs(baseURL, baseURL)
+	client, _ := github.NewClient(github.WithAuthToken("fake-token"), github.WithEnterpriseURLs(baseURL, baseURL))
 	return srv, client
 }
 

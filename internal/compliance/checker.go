@@ -5,7 +5,7 @@ import (
 
 	"github.com/eukarya-inc/git-cascade/internal/config"
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // Result represents the outcome of a single compliance check on a repository.

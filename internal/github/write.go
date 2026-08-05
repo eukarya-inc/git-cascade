@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // FileWrite is a single file to create or overwrite in a commit produced by CommitFiles.
@@ -109,10 +109,10 @@ func CreateOrUpdatePullRequest(ctx context.Context, client *github.Client, owner
 		return existing[0].GetHTMLURL(), nil
 	}
 
-	pr, _, err := client.PullRequests.Create(ctx, owner, repo, &github.NewPullRequest{
+	pr, _, err := client.PullRequests.Create(ctx, owner, repo, github.CreatePullRequest{
 		Title: &title,
-		Head:  &head,
-		Base:  &base,
+		Head:  head,
+		Base:  base,
 		Body:  &body,
 		Draft: &draft,
 	})

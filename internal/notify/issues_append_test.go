@@ -10,7 +10,7 @@ import (
 
 	"github.com/eukarya-inc/git-cascade/internal/compliance"
 	"github.com/eukarya-inc/git-cascade/internal/config"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v90/github"
 )
 
 // fakeIssuesAPI is a minimal in-memory GitHub Issues API used to exercise the
@@ -42,13 +42,13 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(f.issues)
 		case http.MethodPost:
-			var req github.IssueRequest
+			var req github.CreateIssueRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			num := int(f.nextIssueID)
 			f.nextIssueID++
 			issue := &github.Issue{
 				Number:  &num,
-				Title:   req.Title,
+				Title:   &req.Title,
 				Body:    req.Body,
 				HTMLURL: github.Ptr("https://github.com/o/r/issues/" + strconv.Itoa(num)),
 			}
@@ -68,7 +68,7 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 		num, _ := strconv.Atoi(parts[0])
 
 		if len(parts) == 1 && r.Method == http.MethodPatch {
-			var req github.IssueRequest
+			var req github.UpdateIssueRequest
 			json.NewDecoder(r.Body).Decode(&req)
 			for _, issue := range f.issues {
 				if issue.GetNumber() == num {
@@ -131,9 +131,8 @@ func (f *fakeIssuesAPI) serve(t *testing.T) *github.Client {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	client := github.NewClient(nil)
 	baseURL := srv.URL + "/api/v3/"
-	client, _ = client.WithEnterpriseURLs(baseURL, baseURL)
+	client, _ := github.NewClient(github.WithEnterpriseURLs(baseURL, baseURL))
 	return client
 }
 
