@@ -180,6 +180,29 @@ func TestFindOrCreateIssueByTitle_CreatesWhenMissing(t *testing.T) {
 	}
 }
 
+func TestFindOrCreateIssueByTitle_CreateFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]*github.Issue{})
+		case http.MethodPost:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	baseURL := srv.URL + "/api/v3/"
+	client, _ := github.NewClient(github.WithEnterpriseURLs(baseURL, baseURL))
+
+	if _, _, err := findOrCreateIssueByTitle(t.Context(), client, "o", "r", "Integrated Findings", nil); err == nil {
+		t.Error("expected error when issue creation fails")
+	}
+}
+
 func TestFindOrCreateIssueByTitle_FindsExisting(t *testing.T) {
 	fake := newFakeIssuesAPI()
 	client := fake.serve(t)
