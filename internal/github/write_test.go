@@ -43,11 +43,15 @@ func TestEnsureBranch_CreatesWhenMissing(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	if err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123"); err != nil {
+	sha, err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !created {
 		t.Error("expected CreateRef to be called")
+	}
+	if sha != "abc123" {
+		t.Errorf("got sha=%q, want abc123", sha)
 	}
 }
 
@@ -58,7 +62,7 @@ func TestEnsureBranch_ErrorsOnNon404GetRefFailure(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123")
+	_, err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123")
 	if err == nil {
 		t.Fatal("expected error on a non-404 GetRef failure")
 	}
@@ -77,7 +81,7 @@ func TestEnsureBranch_ErrorsOnCreateRefFailure(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123")
+	_, err := EnsureBranch(context.Background(), client, "o", "r", "newbranch", "abc123")
 	if err == nil {
 		t.Fatal("expected error on CreateRef failure")
 	}
@@ -96,8 +100,12 @@ func TestEnsureBranch_NoOpWhenExists(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	if err := EnsureBranch(context.Background(), client, "o", "r", "existing", "abc123"); err != nil {
+	sha, err := EnsureBranch(context.Background(), client, "o", "r", "existing", "abc123")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha != "abc123" {
+		t.Errorf("got sha=%q, want abc123", sha)
 	}
 }
 
@@ -106,9 +114,6 @@ func TestEnsureBranch_NoOpWhenExists(t *testing.T) {
 func TestCommitFiles_CreatesCommitAndUpdatesRef(t *testing.T) {
 	var sawTree, sawCommit, sawUpdateRef bool
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -140,7 +145,7 @@ func TestCommitFiles_CreatesCommitAndUpdatesRef(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	sha, err := CommitFiles(context.Background(), client, "o", "r", "fix", "fix it", nil, []FileWrite{
+	sha, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "fix it", nil, []FileWrite{
 		{Path: "a.txt", Content: []byte("hello")},
 	})
 	if err != nil {
@@ -156,9 +161,6 @@ func TestCommitFiles_CreatesCommitAndUpdatesRef(t *testing.T) {
 
 func TestCommitFiles_NoopWhenTreeUnchanged(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -170,7 +172,7 @@ func TestCommitFiles_NoopWhenTreeUnchanged(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	sha, err := CommitFiles(context.Background(), client, "o", "r", "fix", "no-op", nil, []FileWrite{
+	sha, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "no-op", nil, []FileWrite{
 		{Path: "a.txt", Content: []byte("hello")},
 	})
 	if err != nil {
@@ -181,33 +183,14 @@ func TestCommitFiles_NoopWhenTreeUnchanged(t *testing.T) {
 	}
 }
 
-func TestCommitFiles_ErrorsWhenBranchRefFetchFails(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
-	client := newTestClient(t, mux)
-
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
-	if err == nil {
-		t.Fatal("expected error when the branch ref can't be fetched")
-	}
-	if !strings.Contains(err.Error(), "fetching branch") {
-		t.Errorf("expected wrapped 'fetching branch' error, got: %v", err)
-	}
-}
-
 func TestCommitFiles_ErrorsWhenHeadCommitFetchFails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
 	})
 	client := newTestClient(t, mux)
 
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
+	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
 	if err == nil {
 		t.Fatal("expected error when the head commit can't be fetched")
 	}
@@ -218,9 +201,6 @@ func TestCommitFiles_ErrorsWhenHeadCommitFetchFails(t *testing.T) {
 
 func TestCommitFiles_ErrorsWhenCreateTreeFails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -229,7 +209,7 @@ func TestCommitFiles_ErrorsWhenCreateTreeFails(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
+	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
 	if err == nil {
 		t.Fatal("expected error when CreateTree fails")
 	}
@@ -240,9 +220,6 @@ func TestCommitFiles_ErrorsWhenCreateTreeFails(t *testing.T) {
 
 func TestCommitFiles_ErrorsWhenCreateCommitFails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -254,7 +231,7 @@ func TestCommitFiles_ErrorsWhenCreateCommitFails(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
+	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
 	if err == nil {
 		t.Fatal("expected error when CreateCommit fails")
 	}
@@ -265,9 +242,6 @@ func TestCommitFiles_ErrorsWhenCreateCommitFails(t *testing.T) {
 
 func TestCommitFiles_ErrorsWhenUpdateRefFails(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -282,7 +256,7 @@ func TestCommitFiles_ErrorsWhenUpdateRefFails(t *testing.T) {
 	})
 	client := newTestClient(t, mux)
 
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
+	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "msg", nil, []FileWrite{{Path: "a.txt", Content: []byte("x")}})
 	if err == nil {
 		t.Fatal("expected error when UpdateRef fails")
 	}
@@ -294,9 +268,6 @@ func TestCommitFiles_ErrorsWhenUpdateRefFails(t *testing.T) {
 func TestCommitFiles_UsesProvidedAuthor(t *testing.T) {
 	var gotAuthor, gotCommitter string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/fix", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/fix"), Object: &github.GitObject{SHA: github.Ptr("head1")}})
-	})
 	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
 	})
@@ -316,7 +287,7 @@ func TestCommitFiles_UsesProvidedAuthor(t *testing.T) {
 	client := newTestClient(t, mux)
 
 	name := "git-cascade"
-	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "msg", &github.CommitAuthor{Name: &name}, []FileWrite{
+	_, err := CommitFiles(context.Background(), client, "o", "r", "fix", "head1", "msg", &github.CommitAuthor{Name: &name}, []FileWrite{
 		{Path: "a.txt", Content: []byte("x")},
 	})
 	if err != nil {
