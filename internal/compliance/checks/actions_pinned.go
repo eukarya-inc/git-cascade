@@ -19,6 +19,47 @@ var shaRef = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // It captures the ref portion after @.
 var usesPattern = regexp.MustCompile(`uses:\s*['"]?([^@'"]+)@([^'"#\s]+)`)
 
+// UnpinnedAction is a single `uses: owner/repo@ref` occurrence found by
+// FindUnpinnedActions whose ref is not a full commit SHA.
+type UnpinnedAction struct {
+	Line   int    // 0-based index into the content's lines
+	Action string // e.g. "actions/checkout"
+	Ref    string // e.g. "v4"
+}
+
+// FindUnpinnedActions scans a single workflow file's content for `uses:`
+// references that are not pinned to a 40-character SHA, skipping local
+// (./...) and docker:// actions and lines suppressed with a
+// git-cascade:allow comment. Exported so the actions-pinned remediator can
+// reuse the exact same detection logic as this checker.
+func FindUnpinnedActions(content string) []UnpinnedAction {
+	lines := strings.Split(content, "\n")
+	var found []UnpinnedAction
+	for i, line := range lines {
+		m := usesPattern.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		action := m[1]
+		actionRef := m[2]
+
+		if strings.HasPrefix(action, ".") {
+			continue
+		}
+		if strings.HasPrefix(action, "docker://") {
+			continue
+		}
+		if shaRef.MatchString(actionRef) {
+			continue
+		}
+		if hasAllowComment(lines, i) {
+			continue
+		}
+		found = append(found, UnpinnedAction{Line: i, Action: action, Ref: actionRef})
+	}
+	return found
+}
+
 type actionsPinnedChecker struct{}
 
 func (c *actionsPinnedChecker) ID() string { return "actions-pinned" }
@@ -57,30 +98,8 @@ func (c *actionsPinnedChecker) Check(ctx context.Context, client *github.Client,
 			continue
 		}
 
-		lines := strings.Split(string(content), "\n")
-		for i, line := range lines {
-			m := usesPattern.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			action := m[1]
-			actionRef := m[2]
-
-			// Skip local actions (e.g. ./.github/actions/foo)
-			if strings.HasPrefix(action, ".") {
-				continue
-			}
-			// Skip docker:// references
-			if strings.HasPrefix(action, "docker://") {
-				continue
-			}
-			if shaRef.MatchString(actionRef) {
-				continue
-			}
-			if hasAllowComment(lines, i) {
-				continue
-			}
-			violations = append(violations, fmt.Sprintf("%s: %s@%s", name, action, actionRef))
+		for _, v := range FindUnpinnedActions(string(content)) {
+			violations = append(violations, fmt.Sprintf("%s: %s@%s", name, v.Action, v.Ref))
 		}
 	}
 

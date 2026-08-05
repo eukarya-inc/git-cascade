@@ -227,8 +227,12 @@ func (c *hardenRunnerChecker) Check(ctx context.Context, client *github.Client, 
 			continue
 		}
 
-		if missing := jobsMissingHardenRunner(string(content)); len(missing) > 0 {
-			violations = append(violations, fmt.Sprintf("%s (jobs: %s)", name, strings.Join(missing, ", ")))
+		if missing := FindJobsMissingHardenRunner(string(content)); len(missing) > 0 {
+			names := make([]string, len(missing))
+			for i, m := range missing {
+				names[i] = m.Job
+			}
+			violations = append(violations, fmt.Sprintf("%s (jobs: %s)", name, strings.Join(names, ", ")))
 		}
 	}
 
@@ -253,8 +257,17 @@ func (c *hardenRunnerChecker) Check(ctx context.Context, client *github.Client, 
 	}, nil
 }
 
-// jobsMissingHardenRunner parses workflow YAML line-by-line and returns the
-// names of jobs whose first step does not use step-security/harden-runner.
+// MissingHardenRunnerJob is a single job found by FindJobsMissingHardenRunner
+// whose first step is not step-security/harden-runner.
+type MissingHardenRunnerJob struct {
+	Job string
+	// StepsLine is the 0-based index of the job's `steps:` line, so a
+	// remediator can insert a new first step directly after it.
+	StepsLine int
+}
+
+// FindJobsMissingHardenRunner parses workflow YAML line-by-line and returns
+// the jobs whose first step does not use step-security/harden-runner.
 //
 // Parsing strategy (indentation-based, no full YAML parser):
 //
@@ -265,11 +278,12 @@ func (c *hardenRunnerChecker) Check(ctx context.Context, client *github.Client, 
 //     that starts with `step-security/harden-runner`.  We look ahead within
 //     that item's lines until we either find `uses:` or reach the next item /
 //     next job / end of file.
-func jobsMissingHardenRunner(content string) []string {
+func FindJobsMissingHardenRunner(content string) []MissingHardenRunnerJob {
 	lines := strings.Split(content, "\n")
 
 	inJobs := false
 	currentJob := ""
+	currentStepsLine := -1
 	// inSteps is true while we are still inside the `steps:` block of a job
 	// (set to false once we pass the first step, so continuation lines stop
 	// being examined).
@@ -279,18 +293,18 @@ func jobsMissingHardenRunner(content string) []string {
 	firstStepChecked := false
 	firstStepHardened := false
 
-	var missing []string
+	var missing []MissingHardenRunnerJob
 
 	finishJob := func() {
 		if currentJob == "" {
 			return
 		}
 		if hadSteps && firstStepChecked && !firstStepHardened {
-			missing = append(missing, currentJob)
+			missing = append(missing, MissingHardenRunnerJob{Job: currentJob, StepsLine: currentStepsLine})
 		}
 	}
 
-	for _, raw := range lines {
+	for lineIdx, raw := range lines {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
@@ -316,6 +330,7 @@ func jobsMissingHardenRunner(content string) []string {
 		if indent == 2 && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "-") {
 			finishJob()
 			currentJob = strings.TrimSuffix(trimmed, ":")
+			currentStepsLine = -1
 			inSteps = false
 			hadSteps = false
 			firstStepChecked = false
@@ -328,6 +343,7 @@ func jobsMissingHardenRunner(content string) []string {
 		}
 
 		if indent == 4 && trimmed == "steps:" {
+			currentStepsLine = lineIdx
 			inSteps = true
 			hadSteps = true
 			firstStepChecked = false

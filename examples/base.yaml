@@ -30,6 +30,12 @@ output:
   format: table      # table | json | csv | sarif
   # path: results.sarif
 
+# remediation:
+#   enabled: false            # master switch — nothing runs unless true. Each rule opts in individually via its own auto_remediation field.
+#   branch_prefix: "git-cascade/fix"
+#   pr_labels:
+#     - automated-fix
+
 notify:
   slack:
     enabled: false

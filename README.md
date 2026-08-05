@@ -50,6 +50,10 @@ All parameters can be configured via environment variables. CLI flags take prece
 | `GIT_CASCADE_ISSUE_HEADER` | `--issue-header` | Override the issue body heading (mode=compliance, default: `# Compliance Report — {org}`) |
 | `GIT_CASCADE_ISSUE_TITLE` | `--issue-title` | Issue title (required for mode=append; overrides the default title for mode=compliance\|repo) |
 | `GIT_CASCADE_ISSUE_SECTION_KEY` | `--issue-section-key` | Identifies this config's comment on a shared issue (mode=append, default: org) |
+| `GIT_CASCADE_REMEDIATE_TOKEN` | `--remediate-token` | GitHub PAT for opening auto-remediation pull requests (required when `remediation.enabled` is true; no fallback to the scan token) |
+| `GIT_CASCADE_REMEDIATE_APP_ID` | `--remediate-app-id` | GitHub App ID for opening auto-remediation pull requests |
+| `GIT_CASCADE_REMEDIATE_INSTALLATION_ID` | `--remediate-installation-id` | GitHub App Installation ID for opening auto-remediation pull requests |
+| `GIT_CASCADE_REMEDIATE_PRIVATE_KEY_PATH` | `--remediate-private-key-path` | Path to the GitHub App private key PEM file for opening auto-remediation pull requests |
 | `GIT_CASCADE_CONCURRENCY` | `--concurrency` | Number of concurrent (rule, repo) checks (default: 5) |
 
 ## Authentication
@@ -97,6 +101,15 @@ git-cascade scan --org org-a --app-id 111 --installation-id 222 --private-key-pa
   --notify-app-id 333 --notify-installation-id 444 --notify-private-key-path org-b.pem
 ```
 
+### Credentials for auto-remediation
+
+Auto-remediation (see [Auto-Remediation](#auto-remediation)) writes directly to scanned repositories — creating branches, commits, and pull requests — so it always requires its own explicit credentials via `--remediate-*` flags or `GIT_CASCADE_REMEDIATE_*` env vars. Unlike notify credentials, there is **no fallback** to the scan token: if `remediation.enabled` is true and no remediate credentials are supplied, `scan` fails before doing anything.
+
+```bash
+export GIT_CASCADE_REMEDIATE_TOKEN=ghp_xxx
+git-cascade scan --org myorg
+```
+
 ## Required Permissions
 
 The table below lists the minimum permissions needed. Use the **read-only** column if you only run compliance checks. Add the **write** column if you use `--issue-mode` to post GitHub Issues.
@@ -133,6 +146,16 @@ The table below lists the minimum permissions needed. Use the **read-only** colu
 | Repository: Issues | — | Read & Write |
 
 The GitHub App must be installed on the organization with access to the repositories you want to scan. For `--issue-mode compliance` or `--issue-mode append`, the app also needs Issues write access on the repository holding the issue (compliance repo, or `--issue-repo` for `append`).
+
+### Auto-Remediation
+
+The `--remediate-*` credentials (see [Credentials for auto-remediation](#credentials-for-auto-remediation)) need write access on every repository that has a rule with `auto_remediation` enabled — this is separate from the read-only scan token or the notify token's Issues permission.
+
+| Token type | Required permission |
+|-----------|---------------------|
+| PAT (Classic) | `repo` |
+| Fine-Grained PAT | Repository: Contents (Read & Write), Repository: Pull requests (Read & Write) |
+| GitHub App | Repository: Contents (Read & Write), Repository: Pull requests (Read & Write) |
 
 ### Slack Notification
 
@@ -289,7 +312,23 @@ notify:
       - compliance
       - automated
 
+remediation:
+  enabled: false          # master switch — nothing runs unless true. Each rule opts in individually via its own auto_remediation field.
+  branch_prefix: "git-cascade/fix"  # branch = {branch_prefix}/{rule-id}
+  commit_author:
+    name: "git-cascade"
+    email: "git-cascade[bot]@users.noreply.github.com"
+  pr_labels:
+    - automated-fix
+  draft_pr: false
+
 rules:
+  - id: actions-pinned
+    name: Actions Pinned to SHA
+    severity: error
+    enabled: true
+    auto_remediation: true  # opens a PR pinning unpinned `uses:` refs to a resolved commit SHA
+
   - id: branch-protection
     name: Branch Protection
     description: Default branch must have branch protection rules enabled
@@ -744,6 +783,49 @@ git-cascade scan --org myorg --issue-mode append --issue-repo myorg/security \
 ```
 
 > Requires Issues: Read & Write permission (see [Required Permissions](#required-permissions)).
+
+## Auto-Remediation
+
+For rules where the fix is a mechanical, deterministic file edit, git-cascade can open a pull request that applies it automatically instead of only reporting the finding.
+
+Auto-remediation is off by default and gated at two levels:
+
+1. **`remediation.enabled`** — the master switch. Nothing runs unless this is `true`.
+2. **`auto_remediation`** — whether a *given rule* should be remediated, set per-rule (`rules[].auto_remediation`). There is no block-level default: each rule opts in individually, so a newly registered fixer never goes live silently just because remediation as a whole is already turned on.
+
+```yaml
+remediation:
+  enabled: true
+
+rules:
+  - id: actions-pinned
+    enabled: true
+    auto_remediation: true  # this rule opts in explicitly
+```
+
+Currently supported rules:
+
+| Rule ID | Fix |
+|---------|-----|
+| `actions-pinned` | Resolves each unpinned `uses: owner/repo@tag` to a full commit SHA and rewrites it as `uses: owner/repo@<sha> # tag`, preserving the original ref as a trailing comment. Refs that can't be resolved (e.g. a deleted tag) are left untouched rather than failing the whole run. |
+| `npm-ci-required` | Rewrites `npm install` → `npm ci`, and appends `--frozen-lockfile` / `--immutable` to a bare `pnpm install` / `yarn`. Skips compound commands (`&&`, `;`) and `npm install <pkg>` (installs a dependency, not a lockfile restore — `npm ci` can't express that) rather than guessing. |
+| `harden-runner-required` | Inserts `step-security/harden-runner@<sha> # v2` as the first step of every job missing it, resolving the pin against the `v2` tag once per repo and reusing it across files. |
+| `readme-exists` | Adds a minimal `README.md` stub (`# {repo}` + a TODO line) when the repository has none of README.md/README/README.rst/readme.md. |
+
+These four are the **high-confidence candidates** identified so far — mechanical, deterministic, behavior-preserving fixes.
+
+Rules considered too risky or ambiguous for *automatic* file-based remediation (a human judgment call — license choice, secret rotation, semantic changes to CI triggers, etc. — is required): `renovate-config`, `no-secrets-inherit`, `no-pull-request-target`, `license-exists`, `codeowners-exists`, `dockerfile-digest`, `lockfile-required`, `no-env-files`, `ai-config-safety`, `secret-detection`. `branch-protection` and `external-collaborators` are repo/org API settings, not file edits, and are out of scope for this file-based remediation mechanism entirely.
+
+More rules will get remediators over time — a rule with no registered remediator is simply skipped even if `auto_remediation` is `true` on it.
+
+**Mechanics**: for each failing result with remediation enabled, git-cascade creates (or reuses) a branch named `{branch_prefix}/{rule-id}` off the repository's default branch, commits the fix, and opens a pull request into the default branch — or updates the existing open PR from a prior run instead of creating a duplicate. Nothing is ever committed directly to the default branch.
+
+```bash
+export GIT_CASCADE_REMEDIATE_TOKEN=ghp_xxx
+git-cascade scan --org myorg
+```
+
+> Requires Contents and Pull requests Read & Write permission on the remediate credential — separate from the scan token and the notify token (see [Required Permissions](#required-permissions)).
 
 ## Performance
 

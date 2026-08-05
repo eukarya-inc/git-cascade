@@ -127,3 +127,50 @@ func TestHasYarnInstallViolation(t *testing.T) {
 		})
 	}
 }
+
+func TestFindNodeInstallViolations(t *testing.T) {
+	content := `name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - run: npm install
+      - run: npm ci
+      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: yarn
+      - run: yarn --immutable
+      - run: npm install # git-cascade:allow
+`
+	got := FindNodeInstallViolations(content)
+	want := []NodeInstallViolation{
+		{Line: 5, Kind: "npm"},
+		{Line: 7, Kind: "pnpm"},
+		{Line: 9, Kind: "yarn"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d violations, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("violation[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFindNodeInstallViolations_NoneWhenAllLockedOrNotInstalls(t *testing.T) {
+	content := `name: CI
+on: push
+jobs:
+  build:
+    steps:
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+      - run: yarn --immutable
+      - run: echo hello
+`
+	got := FindNodeInstallViolations(content)
+	if len(got) != 0 {
+		t.Errorf("expected no violations, got %+v", got)
+	}
+}

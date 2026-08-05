@@ -12,6 +12,8 @@ import (
 	gh "github.com/eukarya-inc/git-cascade/internal/github"
 	"github.com/eukarya-inc/git-cascade/internal/notify"
 	"github.com/eukarya-inc/git-cascade/internal/output"
+	"github.com/eukarya-inc/git-cascade/internal/remediation"
+	_ "github.com/eukarya-inc/git-cascade/internal/remediation/fixes"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +33,15 @@ var scanFlags struct {
 	notifyAppID          int64
 	notifyInstallationID int64
 	notifyPrivateKeyPath string
+
+	// GitHub / auth for auto-remediation (opening fix PRs). Unlike notify
+	// credentials, this set has no fallback to the scan credentials — it
+	// must be supplied explicitly whenever remediation.enabled is true,
+	// since it writes directly to scanned repositories.
+	remediateToken          string
+	remediateAppID          int64
+	remediateInstallationID int64
+	remediatePrivateKeyPath string
 
 	// Config loading
 	configRepo  string
@@ -83,6 +94,12 @@ func init() {
 	f.Int64Var(&scanFlags.notifyAppID, "notify-app-id", 0, "GitHub App ID for posting notifications, if different from --app-id")
 	f.Int64Var(&scanFlags.notifyInstallationID, "notify-installation-id", 0, "GitHub App Installation ID for posting notifications, if different from --installation-id")
 	f.StringVar(&scanFlags.notifyPrivateKeyPath, "notify-private-key-path", "", "Path to GitHub App private key PEM file for posting notifications, if different from --private-key-path")
+
+	// GitHub / auth for auto-remediation (required whenever remediation.enabled is true; no fallback)
+	f.StringVar(&scanFlags.remediateToken, "remediate-token", "", "GitHub Personal Access Token for opening auto-remediation pull requests (or set GIT_CASCADE_REMEDIATE_TOKEN)")
+	f.Int64Var(&scanFlags.remediateAppID, "remediate-app-id", 0, "GitHub App ID for opening auto-remediation pull requests")
+	f.Int64Var(&scanFlags.remediateInstallationID, "remediate-installation-id", 0, "GitHub App Installation ID for opening auto-remediation pull requests")
+	f.StringVar(&scanFlags.remediatePrivateKeyPath, "remediate-private-key-path", "", "Path to GitHub App private key PEM file for opening auto-remediation pull requests")
 
 	// Config loading
 	f.StringVar(&scanFlags.configRepo, "config-repo", compliance.DefaultConfigRepo, "Repository containing compliance configs")
@@ -271,6 +288,40 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing output: %w", err)
 	}
 
+	// Auto-remediation — opens/updates fix PRs for failing rules that have
+	// auto_remediation enabled (per-rule or via the remediation config
+	// default) and a registered remediator. Requires its own credentials;
+	// scan/notify tokens are never silently reused for repo writes.
+	if cfg.Remediation.Enabled {
+		remediateCreds, err := resolveRemediateCredentials()
+		if err != nil {
+			return fmt.Errorf("resolving remediate credentials: %w", err)
+		}
+		remediateClient, err := gh.NewClient(remediateCreds)
+		if err != nil {
+			return fmt.Errorf("creating remediate GitHub client: %w", err)
+		}
+
+		rulesByID := make(map[string]config.Rule, len(cfg.Rules))
+		for _, r := range cfg.Rules {
+			rulesByID[r.ID] = r
+		}
+		reposByName := make(map[string]gh.Repository, len(repos))
+		for _, r := range repos {
+			reposByName[r.FullName] = r
+		}
+
+		logger.Info("running auto-remediation")
+		outcomes := remediation.Run(ctx, remediateClient, cfg.Remediation, results, rulesByID, reposByName, logger)
+		for _, o := range outcomes {
+			if o.Err != nil {
+				logger.Warn("remediation failed", "rule", o.RuleID, "repo", o.Repo, "error", o.Err)
+			} else if o.PRURL != "" {
+				logger.Info("remediation PR", "rule", o.RuleID, "repo", o.Repo, "url", o.PRURL)
+			}
+		}
+	}
+
 	// GitHub Issues — CLI flags > env vars > config file
 	// Run before Slack so the issue URL can be linked in the notification.
 	issueCfg := cfg.Notify.Issues
@@ -375,6 +426,30 @@ func resolveCredentials() (gh.Credentials, error) {
 		installIDEnv:   "GIT_CASCADE_INSTALLATION_ID",
 		privateKeyEnv:  "GIT_CASCADE_PRIVATE_KEY_PATH",
 		flagPrefix:     "--",
+	})
+}
+
+// resolveRemediateCredentials resolves credentials for opening auto-remediation
+// pull requests. Unlike resolveNotifyCredentials, this never falls back to the
+// scan credentials: remediation writes directly to scanned repositories, so an
+// explicit --remediate-* flag or GIT_CASCADE_REMEDIATE_* env var is required.
+func resolveRemediateCredentials() (gh.Credentials, error) {
+	if scanFlags.remediateToken == "" && scanFlags.remediateAppID == 0 &&
+		scanFlags.remediateInstallationID == 0 && scanFlags.remediatePrivateKeyPath == "" &&
+		os.Getenv("GIT_CASCADE_REMEDIATE_TOKEN") == "" && os.Getenv("GIT_CASCADE_REMEDIATE_APP_ID") == "" &&
+		os.Getenv("GIT_CASCADE_REMEDIATE_INSTALLATION_ID") == "" && os.Getenv("GIT_CASCADE_REMEDIATE_PRIVATE_KEY_PATH") == "" {
+		return gh.Credentials{}, fmt.Errorf("remediation.enabled is true but no --remediate-token / --remediate-app-id credentials (or GIT_CASCADE_REMEDIATE_* env vars) were supplied")
+	}
+	return resolveCredentialsFrom(credentialFlags{
+		token:          scanFlags.remediateToken,
+		appID:          scanFlags.remediateAppID,
+		installationID: scanFlags.remediateInstallationID,
+		privateKeyPath: scanFlags.remediatePrivateKeyPath,
+		tokenEnv:       "GIT_CASCADE_REMEDIATE_TOKEN",
+		appIDEnv:       "GIT_CASCADE_REMEDIATE_APP_ID",
+		installIDEnv:   "GIT_CASCADE_REMEDIATE_INSTALLATION_ID",
+		privateKeyEnv:  "GIT_CASCADE_REMEDIATE_PRIVATE_KEY_PATH",
+		flagPrefix:     "--remediate-",
 	})
 }
 
