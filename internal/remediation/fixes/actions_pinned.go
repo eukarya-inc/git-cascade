@@ -64,7 +64,7 @@ func (f *actionsPinnedFixer) Remediate(ctx context.Context, client *github.Clien
 	return &remediation.Fix{
 		Files:         files,
 		CommitMessage: "fix(security): pin GitHub Actions to commit SHA",
-		PRTitle:       "git-cascade: pin GitHub Actions to commit SHA",
+		PRTitle:       "fix(actions-pinned): pin GitHub Actions to commit SHA",
 		PRBody: fmt.Sprintf(
 			"Automated fix for the `actions-pinned` compliance rule.\n\nResolved and pinned:\n- %s\n\n_Opened automatically by git-cascade auto-remediation._",
 			strings.Join(fixedRefs, "\n- "),

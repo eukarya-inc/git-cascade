@@ -91,9 +91,11 @@ func CommitFiles(ctx context.Context, client *github.Client, owner, repo, branch
 	return newCommit.GetSHA(), nil
 }
 
-// CreateOrUpdatePullRequest opens a PR from head into base, or returns the
-// URL of an existing open PR with the same head if one is already there —
-// an upsert so re-running remediation doesn't create duplicate PRs.
+// CreateOrUpdatePullRequest opens a PR from head into base, or updates the
+// title/body of an existing open PR with the same head if one is already
+// there — an upsert so re-running remediation doesn't create duplicate PRs
+// but still picks up title/body changes (e.g. a remediator's PR title format
+// changing between runs).
 func CreateOrUpdatePullRequest(ctx context.Context, client *github.Client, owner, repo, head, base, title, body string, labels []string, draft bool) (string, error) {
 	existing, _, err := client.PullRequests.List(ctx, owner, repo, &github.PullRequestListOptions{
 		State: "open",
@@ -104,7 +106,18 @@ func CreateOrUpdatePullRequest(ctx context.Context, client *github.Client, owner
 		return "", fmt.Errorf("listing pull requests: %w", err)
 	}
 	if len(existing) > 0 {
-		return existing[0].GetHTMLURL(), nil
+		pr := existing[0]
+		if pr.GetTitle() != title || pr.GetBody() != body {
+			updated, _, err := client.PullRequests.Edit(ctx, owner, repo, pr.GetNumber(), &github.PullRequest{
+				Title: &title,
+				Body:  &body,
+			})
+			if err != nil {
+				return "", fmt.Errorf("updating pull request: %w", err)
+			}
+			return updated.GetHTMLURL(), nil
+		}
+		return pr.GetHTMLURL(), nil
 	}
 
 	pr, _, err := client.PullRequests.Create(ctx, owner, repo, github.CreatePullRequest{

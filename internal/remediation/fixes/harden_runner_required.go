@@ -80,7 +80,7 @@ func (f *hardenRunnerFixer) Remediate(ctx context.Context, client *github.Client
 	return &remediation.Fix{
 		Files:         files,
 		CommitMessage: "fix(security): add step-security/harden-runner as first step",
-		PRTitle:       "git-cascade: add step-security/harden-runner to workflow jobs",
+		PRTitle:       "fix(harden-runner-required): add step-security/harden-runner to workflow jobs",
 		PRBody: fmt.Sprintf(
 			"Automated fix for the `harden-runner-required` compliance rule.\n\nAdded `step-security/harden-runner@%s` as the first step of:\n- %s\n\n_Opened automatically by git-cascade auto-remediation._",
 			hardenRunnerRef, strings.Join(fixedDescs, "\n- "),

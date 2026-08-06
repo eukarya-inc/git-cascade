@@ -75,7 +75,7 @@ func (f *npmCiRequiredFixer) Remediate(ctx context.Context, client *github.Clien
 	return &remediation.Fix{
 		Files:         files,
 		CommitMessage: "fix(ci): use locked install commands in CI workflows",
-		PRTitle:       "git-cascade: use locked Node.js install commands",
+		PRTitle:       "fix(npm-ci-required): use locked Node.js install commands",
 		PRBody: fmt.Sprintf(
 			"Automated fix for the `npm-ci-required` compliance rule.\n\nLocked install commands:\n- %s\n\n_Opened automatically by git-cascade auto-remediation._",
 			strings.Join(fixedDescs, "\n- "),

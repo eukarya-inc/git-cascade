@@ -27,7 +27,7 @@ func (f *readmeExistsFixer) Remediate(ctx context.Context, client *github.Client
 			{Path: "README.md", Content: []byte(content)},
 		},
 		CommitMessage: "docs: add README",
-		PRTitle:       "git-cascade: add README.md",
+		PRTitle:       "fix(readme-exists): add README.md",
 		PRBody:        "Automated fix for the `readme-exists` compliance rule.\n\nAdded a minimal README.md stub — please expand it with a real project description.\n\n_Opened automatically by git-cascade auto-remediation._",
 	}, nil
 }
