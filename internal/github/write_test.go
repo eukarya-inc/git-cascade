@@ -300,15 +300,23 @@ func TestCommitFiles_UsesProvidedAuthor(t *testing.T) {
 
 // — CreateOrUpdatePullRequest ————————————————————————————————————————————————
 
-func TestCreateOrUpdatePullRequest_ReturnsExistingWhenOpen(t *testing.T) {
+func TestCreateOrUpdatePullRequest_ReturnsExistingWhenOpenAndUnchanged(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v3/repos/o/r/pulls", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, []*github.PullRequest{{HTMLURL: github.Ptr("https://github.com/o/r/pull/1")}})
+			writeJSON(w, []*github.PullRequest{{
+				Number:  github.Ptr(1),
+				Title:   github.Ptr("title"),
+				Body:    github.Ptr("body"),
+				HTMLURL: github.Ptr("https://github.com/o/r/pull/1"),
+			}})
 		case http.MethodPost:
 			t.Fatal("Create should not be called when an open PR already exists")
 		}
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/pulls/1", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("Edit should not be called when title/body are unchanged")
 	})
 	client := newTestClient(t, mux)
 
@@ -318,6 +326,45 @@ func TestCreateOrUpdatePullRequest_ReturnsExistingWhenOpen(t *testing.T) {
 	}
 	if url != "https://github.com/o/r/pull/1" {
 		t.Errorf("got url=%q", url)
+	}
+}
+
+func TestCreateOrUpdatePullRequest_UpdatesTitleWhenChanged(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/o/r/pulls", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, []*github.PullRequest{{
+				Number:  github.Ptr(1),
+				Title:   github.Ptr("git-cascade: old title"),
+				Body:    github.Ptr("old body"),
+				HTMLURL: github.Ptr("https://github.com/o/r/pull/1"),
+			}})
+		case http.MethodPost:
+			t.Fatal("Create should not be called when an open PR already exists")
+		}
+	})
+	var gotTitle, gotBody string
+	mux.HandleFunc("/api/v3/repos/o/r/pulls/1", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("expected PATCH, got %s", r.Method)
+		}
+		var body github.PullRequest
+		json.NewDecoder(r.Body).Decode(&body)
+		gotTitle, gotBody = body.GetTitle(), body.GetBody()
+		writeJSON(w, &github.PullRequest{Number: github.Ptr(1), HTMLURL: github.Ptr("https://github.com/o/r/pull/1")})
+	})
+	client := newTestClient(t, mux)
+
+	url, err := CreateOrUpdatePullRequest(context.Background(), client, "o", "r", "fix", "main", "new title", "new body", nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != "https://github.com/o/r/pull/1" {
+		t.Errorf("got url=%q", url)
+	}
+	if gotTitle != "new title" || gotBody != "new body" {
+		t.Errorf("got title=%q body=%q", gotTitle, gotBody)
 	}
 }
 
