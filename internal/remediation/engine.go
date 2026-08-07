@@ -101,12 +101,8 @@ func remediateOne(ctx context.Context, client *github.Client, cfg config.Remedia
 	for i, f := range fix.Files {
 		files[i] = gh.FileWrite{Path: f.Path, Content: f.Content}
 	}
-	newSHA, err := gh.CommitFiles(ctx, client, repo.Owner, repo.Name, branch, headSHA, fix.CommitMessage, author, files)
-	if err != nil {
+	if _, err := gh.CommitFiles(ctx, client, repo.Owner, repo.Name, branch, headSHA, fix.CommitMessage, author, files); err != nil {
 		return "", fmt.Errorf("committing fix: %w", err)
-	}
-	if newSHA == "" {
-		return "", nil
 	}
 
 	labels := cfg.PRLabels

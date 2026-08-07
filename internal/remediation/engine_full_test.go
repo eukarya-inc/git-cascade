@@ -131,6 +131,71 @@ func TestRun_OpensPRForRealFix(t *testing.T) {
 	}
 }
 
+// TestRun_SyncsPRTitleWhenCommitIsNoOp verifies that when the fix branch
+// already has the right content (CreateTree yields the same tree SHA, so
+// CommitFiles is a no-op), the PR title/body still gets synced against a
+// stale existing PR instead of being left untouched.
+func TestRun_SyncsPRTitleWhenCommitIsNoOp(t *testing.T) {
+	const branch = "git-cascade/fix/test-rule"
+	var gotEditTitle string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/main", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/main"), Object: &github.GitObject{SHA: github.Ptr("base1")}})
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/git/ref/heads/"+branch, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, &github.Reference{Ref: github.Ptr("refs/heads/" + branch), Object: &github.GitObject{SHA: github.Ptr("head1")}})
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/git/commits/head1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, &github.Commit{SHA: github.Ptr("head1"), Tree: &github.Tree{SHA: github.Ptr("tree1")}})
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/git/trees", func(w http.ResponseWriter, r *http.Request) {
+		// Same tree SHA as the existing head commit's tree: CommitFiles treats
+		// this as a no-op (branch content already matches the fix).
+		writeJSON(w, &github.Tree{SHA: github.Ptr("tree1")})
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/pulls", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, []*github.PullRequest{{
+			Number:  github.Ptr(307),
+			HTMLURL: github.Ptr("https://github.com/o/r/pull/307"),
+			Title:   github.Ptr("git-cascade: old title"),
+			Body:    github.Ptr("old body"),
+		}})
+	})
+	mux.HandleFunc("/api/v3/repos/o/r/pulls/307", func(w http.ResponseWriter, r *http.Request) {
+		var body github.PullRequest
+		json.NewDecoder(r.Body).Decode(&body)
+		gotEditTitle = body.GetTitle()
+		writeJSON(w, &github.PullRequest{Number: github.Ptr(307), HTMLURL: github.Ptr("https://github.com/o/r/pull/307")})
+	})
+	client := newTestClient(t, mux)
+
+	r := &fakeRemediator{id: "test-rule", fix: &Fix{
+		Files:         []FileChange{{Path: "a.txt", Content: []byte("hi")}},
+		CommitMessage: "fix it",
+		PRTitle:       "fix(test-rule): new title",
+		PRBody:        "new body",
+	}}
+	Register(r)
+	defer delete(registry, "test-rule")
+
+	rules := map[string]config.Rule{"test-rule": {ID: "test-rule", AutoRemediation: boolPtr(true)}}
+	results := []compliance.Result{{RuleID: "test-rule", Repo: "o/r", Status: compliance.StatusFail}}
+	repos := map[string]gh.Repository{"o/r": {Owner: "o", Name: "r", FullName: "o/r", DefaultBranch: "main"}}
+	cfg := config.RemediationConfig{Enabled: true}
+
+	outcomes := Run(context.Background(), client, cfg, results, rules, repos, slog.Default())
+	if len(outcomes) != 1 || outcomes[0].Err != nil {
+		t.Fatalf("expected 1 clean outcome, got %+v", outcomes)
+	}
+	if outcomes[0].PRURL != "https://github.com/o/r/pull/307" {
+		t.Errorf("got PRURL=%q", outcomes[0].PRURL)
+	}
+	if gotEditTitle != "fix(test-rule): new title" {
+		t.Errorf("expected PR title to be synced to new title, got %q", gotEditTitle)
+	}
+}
+
 // TestRun_UsesCustomBranchPrefix verifies RemediationConfig.BranchPrefix
 // overrides the "git-cascade/fix" default in the created branch name.
 func TestRun_UsesCustomBranchPrefix(t *testing.T) {
