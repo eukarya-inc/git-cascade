@@ -465,6 +465,54 @@ jobs:
 	}
 }
 
+func TestActionsPinnedChecker_ActionsLock(t *testing.T) {
+	const workflow = `
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+`
+	tests := []struct {
+		name    string
+		lock    string
+		want    compliance.Status
+		wantErr bool
+	}{
+		{"locked tag passes", `workflows:
+  '.github/workflows/ci.yml': ['actions/checkout@v4']
+dependencies:
+  'actions/checkout@v4': {commit: 'sha1-abc123def456abc123def456abc123def456abc1'}
+`, compliance.StatusPass, false},
+		{"tag missing from lock fails", `workflows: {}
+dependencies: {}
+`, compliance.StatusFail, false},
+		{"malformed lock errors", "workflows: [", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeGitHub()
+			fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml", "actions.lock"})
+			fake.setFile("org", "repo", ".github/workflows/ci.yml", []byte(workflow))
+			fake.setFile("org", "repo", ActionsLockPath, []byte(tt.lock))
+			_, client := fake.serve(t)
+
+			result, err := (&actionsPinnedChecker{}).Check(context.Background(), client, pubRepo(), baseRule("actions-pinned"))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error for malformed lockfile")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Check: %v", err)
+			}
+			if result.Status != tt.want {
+				t.Errorf("expected %s, got %s: %s", tt.want, result.Status, result.Message)
+			}
+		})
+	}
+}
+
 func TestActionsPinnedChecker_UnpinnedAction(t *testing.T) {
 	fake := newFakeGitHub()
 	fake.setDir("org", "repo", ".github/workflows", []string{"ci.yml"})

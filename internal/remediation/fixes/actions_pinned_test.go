@@ -149,3 +149,16 @@ dependencies:
 		t.Errorf("expected nil fix when every action is locked, got %+v", fix)
 	}
 }
+
+func TestActionsPinnedFixer_ErrorsOnMalformedLockfile(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/o/scanned-repo/contents/.github/workflows/actions.lock", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"type": "file", "name": "actions.lock", "path": ".github/workflows/actions.lock", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte("workflows: ["))})
+	})
+	client := newTestClient(t, mux)
+
+	repo := gh.Repository{Owner: "o", Name: "scanned-repo", FullName: "o/scanned-repo", DefaultBranch: "main"}
+	if _, err := (&actionsPinnedFixer{}).Remediate(context.Background(), client, repo, config.Rule{ID: "actions-pinned"}, compliance.Result{Status: compliance.StatusFail}); err == nil {
+		t.Fatal("expected error for malformed lockfile")
+	}
+}
