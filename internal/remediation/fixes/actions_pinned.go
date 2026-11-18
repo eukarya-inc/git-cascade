@@ -25,6 +25,11 @@ func (f *actionsPinnedFixer) Remediate(ctx context.Context, client *github.Clien
 		return nil, err
 	}
 
+	lock, err := checks.LoadActionsLock(ctx, client, repo, ref)
+	if err != nil {
+		return nil, err
+	}
+
 	var files []remediation.FileChange
 	var fixedRefs []string
 	for _, entry := range dirContent {
@@ -41,7 +46,7 @@ func (f *actionsPinnedFixer) Remediate(ctx context.Context, client *github.Clien
 			continue
 		}
 
-		violations := checks.FindUnpinnedActions(string(content))
+		violations := checks.FindUnpinnedActions(string(content), entry.GetPath(), lock)
 		if len(violations) == 0 {
 			continue
 		}
