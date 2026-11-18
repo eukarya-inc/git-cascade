@@ -425,7 +425,7 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
 | `license-exists` | Repository must contain a LICENSE file | — |
 | `codeowners-exists` | CODEOWNERS must exist in `.github/`, root, or `docs/` | — |
 | `branch-protection` | Default branch must have protection rules enabled; skipped for private repos on free GitHub plans | `require_reviews`, `required_reviewers`, `additional_branches` |
-| `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags | — |
+| `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags. A `uses: owner/repo@tag` also counts as pinned when [`.github/workflows/actions.lock`](https://gh.io/actions-lockfile) (from `gh actions-lock`) lists it under that workflow and maps it to a commit | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning | — |
 | `npm-ci-required` | CI workflows must use locked install commands (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) instead of bare install commands | — |
@@ -807,7 +807,7 @@ Currently supported rules:
 
 | Rule ID | Fix |
 |---------|-----|
-| `actions-pinned` | Resolves each unpinned `uses: owner/repo@tag` to a full commit SHA and rewrites it as `uses: owner/repo@<sha> # tag`, preserving the original ref as a trailing comment. Refs that can't be resolved (e.g. a deleted tag) are left untouched rather than failing the whole run. |
+| `actions-pinned` | Resolves each unpinned `uses: owner/repo@tag` to a full commit SHA and rewrites it as `uses: owner/repo@<sha> # tag`, preserving the original ref as a trailing comment. Refs that can't be resolved (e.g. a deleted tag) are left untouched rather than failing the whole run. Refs already pinned by `.github/workflows/actions.lock` are skipped. |
 | `npm-ci-required` | Rewrites `npm install` → `npm ci`, and appends `--frozen-lockfile` / `--immutable` to a bare `pnpm install` / `yarn`. Skips compound commands (`&&`, `;`) and `npm install <pkg>` (installs a dependency, not a lockfile restore — `npm ci` can't express that) rather than guessing. |
 | `harden-runner-required` | Inserts `step-security/harden-runner@<sha> # v2` as the first step of every job missing it, resolving the pin against the `v2` tag once per repo and reusing it across files. |
 | `readme-exists` | Adds a minimal `README.md` stub (`# {repo}` + a TODO line) when the repository has none of README.md/README/README.rst/readme.md. |
