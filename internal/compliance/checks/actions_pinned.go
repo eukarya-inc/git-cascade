@@ -33,16 +33,33 @@ func (l *ActionsLock) Locks(workflowPath, action, ref string) bool {
 	if l == nil {
 		return false
 	}
-	key := action + "@" + ref
-	if l.Dependencies[key].Commit == "" {
+	key := lockKey(action, ref)
+	locked := false
+	for k, dep := range l.Dependencies {
+		if dep.Commit != "" && strings.EqualFold(k, key) {
+			locked = true
+			break
+		}
+	}
+	if !locked {
 		return false
 	}
 	for _, k := range l.Workflows[workflowPath] {
-		if k == key {
+		if strings.EqualFold(k, key) {
 			return true
 		}
 	}
 	return false
+}
+
+// lockKey builds the lockfile key for action@ref the way `gh actions-lock`
+// writes it: lowercase owner/repo (sub-path dropped), ref as-is.
+func lockKey(action, ref string) string {
+	parts := strings.SplitN(action, "/", 3)
+	if len(parts) >= 2 {
+		action = parts[0] + "/" + parts[1]
+	}
+	return strings.ToLower(action) + "@" + ref
 }
 
 // ParseActionsLock parses a `gh actions-lock` lockfile.

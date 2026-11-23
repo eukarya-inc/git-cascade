@@ -92,6 +92,28 @@ steps:
 		t.Errorf("expected 3 violations for workflow absent from lock, got %+v", got)
 	}
 
+	// gh actions-lock lowercases owner/repo and drops action sub-paths.
+	mixed, err := ParseActionsLock([]byte(`workflows:
+    '.github/workflows/ownership.yaml':
+        - 'endbug/add-and-commit@v10.0.0'
+        - 'reearth/actions@v1'
+dependencies:
+    'endbug/add-and-commit@v10.0.0':
+        commit: 'sha1-290ea2c423ad77ca9c62ae0f5b224379612c0321'
+    'reearth/actions@v1':
+        commit: 'sha1-5dc7c15db9e464033ecd2fbbca18a0ab10ed5718'
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := FindUnpinnedActions(`
+steps:
+  - uses: EndBug/add-and-commit@v10.0.0
+  - uses: reearth/actions/repository-metadata@v1
+`, ".github/workflows/ownership.yaml", mixed); len(got) != 0 {
+		t.Errorf("expected mixed-case and sub-path actions to match lock, got %+v", got)
+	}
+
 	// No lock behaves as before.
 	if got := FindUnpinnedActions(workflow, ".github/workflows/ci.yaml", nil); len(got) != 3 {
 		t.Errorf("expected 3 violations without lock, got %+v", got)
