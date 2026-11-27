@@ -76,3 +76,48 @@ func fetchFirstExisting(ctx context.Context, client *github.Client, owner, repo,
 		}
 	}
 }
+
+// fetchAllConcurrency bounds the in-flight requests of one fetchAll call.
+const fetchAllConcurrency = 4
+
+// fetchAll fetches every path concurrently (at most fetchAllConcurrency at a
+// time) and returns the contents in the same order as paths; a missing file
+// yields nil. The first error cancels the remaining fetches and is returned.
+func fetchAll(ctx context.Context, client *github.Client, owner, repo, ref string, paths []string) ([][]byte, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	out := make([][]byte, len(paths))
+	sem := make(chan struct{}, fetchAllConcurrency)
+	var (
+		wg       sync.WaitGroup
+		once     sync.Once
+		firstErr error
+	)
+	for i, p := range paths {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			content, err := gh.CachedFetchFileContent(ctx, client, owner, repo, p, ref)
+			if err != nil {
+				once.Do(func() { firstErr = err; cancel() })
+				return
+			}
+			out[i] = content
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
