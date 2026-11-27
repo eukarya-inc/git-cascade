@@ -83,6 +83,11 @@ type dirResult struct {
 	err     error
 }
 
+type treeResult struct {
+	tree *RepoTree
+	err  error
+}
+
 type fileResult struct {
 	content []byte
 	err     error
@@ -116,6 +121,30 @@ func (c *RepoCache) FetchFileContent(ctx context.Context, client *github.Client,
 	}
 	r := v.(*fileResult)
 	return r.content, r.err
+}
+
+// ListTree returns cached results for (owner, repo, ref), making exactly one
+// network call regardless of how many goroutines ask.
+func (c *RepoCache) ListTree(ctx context.Context, client *github.Client, owner, repo, ref string) (*RepoTree, error) {
+	key := "tree:" + owner + "/" + repo + ":" + ref
+	v, err := c.do(key, func() (any, error) {
+		tree, err := ListTree(ctx, client, owner, repo, ref)
+		return &treeResult{tree: tree, err: err}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	r := v.(*treeResult)
+	return r.tree, r.err
+}
+
+// CachedListTree calls the cache if one is in ctx, otherwise calls ListTree
+// directly. Checkers should use this instead of calling ListTree directly.
+func CachedListTree(ctx context.Context, client *github.Client, owner, repo, ref string) (*RepoTree, error) {
+	if c := CacheFromContext(ctx); c != nil {
+		return c.ListTree(ctx, client, owner, repo, ref)
+	}
+	return ListTree(ctx, client, owner, repo, ref)
 }
 
 // CachedListDirectoryContents calls the cache if one is in ctx, otherwise

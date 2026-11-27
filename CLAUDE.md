@@ -36,7 +36,7 @@ CI (`.github/workflows/ci.yml`) runs `go build ./...`, `go vet ./...`, then the 
 
 Each rule ID maps to a `Checker` (`ID() string`, `Check(ctx, client, repo, rule) (*Result, error)`) registered via a package-level `init()` calling `compliance.Register(...)` into a global map. To add a new rule: create `internal/compliance/checks/<name>.go`, implement `Checker`, register it in `init()` — the blank import in `cmd/git-cascade/cmd/scan.go`'s import graph (via `internal/compliance/checks`) wires it up automatically. Look at `file_exists.go` (simplest) and `parallel.go` (fan-out helper for checks needing multiple API calls per repo) as templates.
 
-Checkers must fetch file/directory content through `gh.CachedFetchFileContent` / `gh.CachedListDirectoryContents`, never the raw `gh.FetchFileContent`/`gh.ListDirectoryContents`, so the per-repo cache in the engine's worker pool is actually used.
+Checkers must fetch file/directory content through `gh.CachedFetchFileContent` / `gh.CachedListDirectoryContents` / `gh.CachedListTree` (recursive file listing of the whole repo), never the raw `gh.FetchFileContent`/`gh.ListDirectoryContents`/`gh.ListTree`, so the per-repo cache in the engine's worker pool is actually used.
 
 ### Suppression comments
 

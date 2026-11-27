@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v90/github"
@@ -30,6 +31,8 @@ type fakeGitHub struct {
 	// tarballBody overrides the raw bytes served by the tarball download endpoint.
 	// Useful for injecting a corrupt/non-gzip body.
 	tarballBody []byte
+	// treeTruncated makes the Git Trees endpoint report truncated: true.
+	treeTruncated bool
 }
 
 // newFakeGitHub creates a fakeGitHub with empty maps.
@@ -66,6 +69,8 @@ func (f *fakeGitHub) setGitTree(owner, repo, _ string, _ []string) {
 
 // serve starts an httptest.Server that handles:
 //   - /api/v3/repos/{owner}/{repo}/contents/{path}       (file/dir contents)
+//   - /api/v3/repos/{owner}/{repo}/git/ref/heads/{branch}  (branch HEAD, always "testsha")
+//   - /api/v3/repos/{owner}/{repo}/git/trees/{sha}        (recursive tree of registered files)
 //   - /api/v3/repos/{owner}/{repo}/tarball/{ref}          (archive download redirect)
 //   - /tarball/{owner}/{repo}                             (actual gzipped tar)
 //
@@ -91,6 +96,21 @@ func (f *fakeGitHub) serve(t *testing.T) (*httptest.Server, *github.Client) {
 		switch section {
 		case "contents":
 			f.serveContents(w, owner, repo, tail)
+		case "git":
+			switch {
+			case !f.hasArchive[owner+"/"+repo]:
+				http.NotFound(w, r)
+			case strings.HasPrefix(tail, "ref/heads/"):
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{
+					"ref":    "refs/" + strings.TrimPrefix(tail, "ref/"),
+					"object": map[string]any{"sha": "testsha", "type": "commit"},
+				})
+			case strings.HasPrefix(tail, "trees/"):
+				f.serveTree(w, owner, repo)
+			default:
+				http.NotFound(w, r)
+			}
 		case "tarball":
 			// Redirect to the tarball download endpoint using an absolute URL so
 			// that the Location header is fully qualified (go-github parses it as-is).
@@ -164,6 +184,21 @@ func (f *fakeGitHub) serveContents(w http.ResponseWriter, owner, repo, filePath 
 	}
 
 	http.NotFound(w, nil)
+}
+
+// serveTree lists every file registered for owner/repo as a blob in a Git
+// Trees API response.
+func (f *fakeGitHub) serveTree(w http.ResponseWriter, owner, repo string) {
+	repoKey := owner + "/" + repo + "/"
+	entries := []map[string]any{}
+	for key := range f.files {
+		if len(key) <= len(repoKey) || key[:len(repoKey)] != repoKey {
+			continue
+		}
+		entries = append(entries, map[string]any{"path": key[len(repoKey):], "type": "blob"})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"sha": "testsha", "tree": entries, "truncated": f.treeTruncated})
 }
 
 // serveTarball builds an in-memory gzipped tar from all files registered for

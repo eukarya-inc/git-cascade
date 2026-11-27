@@ -682,7 +682,8 @@ func TestDockerfileDigestChecker_EmptyRepo(t *testing.T) {
 
 func TestDockerfileDigestChecker_NoDockerfile(t *testing.T) {
 	fake := newFakeGitHub()
-	fake.setDir("org", "repo", "", []string{"main.go", "go.mod"})
+	fake.setFile("org", "repo", "main.go", []byte("package main\n"))
+	fake.setFile("org", "repo", "internal/dockerfile_test.go", []byte("package x\n"))
 	_, client := fake.serve(t)
 
 	c := &dockerfileDigestChecker{}
@@ -690,8 +691,8 @@ func TestDockerfileDigestChecker_NoDockerfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if result.Status != compliance.StatusSkip {
-		t.Errorf("expected skip for no Dockerfile, got %s", result.Status)
+	if result.Status != compliance.StatusSkip || result.Message != "no Dockerfiles found" {
+		t.Errorf("expected skip \"no Dockerfiles found\", got %s: %s", result.Status, result.Message)
 	}
 }
 
@@ -727,6 +728,60 @@ func TestDockerfileDigestChecker_Unpinned(t *testing.T) {
 	}
 	if result.Status != compliance.StatusFail {
 		t.Errorf("expected fail for unpinned FROM, got %s", result.Status)
+	}
+}
+
+func TestDockerfileDigestChecker_SubdirectoryDockerfiles(t *testing.T) {
+	// Dockerfiles below the root (web/, cms/web/) must be checked too, with
+	// ARG defaults resolved in FROM lines.
+	fake := newFakeGitHub()
+	fake.setFile("org", "repo", "go.mod", []byte("module x\n"))
+	fake.setFile("org", "repo", "web/Dockerfile", []byte("FROM nginx:1.27\n"))
+	fake.setFile("org", "repo", "cms/web/Dockerfile", []byte("ARG NGINX_VERSION=1.27\nFROM nginx:${NGINX_VERSION}\n"))
+	fake.setFile("org", "repo", "node_modules/pkg/Dockerfile", []byte("FROM node:22\n"))
+	_, client := fake.serve(t)
+
+	c := &dockerfileDigestChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("dockerfile-digest"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Fatalf("expected fail, got %s: %s", result.Status, result.Message)
+	}
+	for _, want := range []string{
+		"2 FROM image(s)",
+		"web/Dockerfile:1: FROM nginx:1.27",
+		"cms/web/Dockerfile:2: FROM nginx:${NGINX_VERSION} (= nginx:1.27)",
+	} {
+		if !strings.Contains(result.Message, want) {
+			t.Errorf("message %q missing %q", result.Message, want)
+		}
+	}
+	if strings.Contains(result.Message, "node_modules") {
+		t.Errorf("node_modules Dockerfile should be skipped: %s", result.Message)
+	}
+}
+
+func TestDockerfileDigestChecker_TruncatedTreeChecksRoot(t *testing.T) {
+	// A truncated tree listing that misses the root Dockerfile must still
+	// check it (via the root listing) and say the listing was truncated.
+	fake := newFakeGitHub()
+	fake.treeTruncated = true
+	fake.setFile("org", "repo", "Dockerfile", []byte("FROM node:22\n"))
+	fake.setDir("org", "repo", "", []string{"Dockerfile"})
+	_, client := fake.serve(t)
+
+	c := &dockerfileDigestChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), baseRule("dockerfile-digest"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusFail {
+		t.Fatalf("expected fail, got %s: %s", result.Status, result.Message)
+	}
+	if !strings.Contains(result.Message, "1 FROM image(s)") || !strings.Contains(result.Message, "truncated") {
+		t.Errorf("unexpected message: %s", result.Message)
 	}
 }
 

@@ -171,7 +171,7 @@ No additional GitHub permissions are required for Slack notifications. See [Slac
 | `branch-protection` | `GET /repos/{owner}/{repo}/branches/{branch}/protection` | `repo` | Administration: Read | Administration: Read |
 | `actions-pinned` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `lockfile-required` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
-| `dockerfile-digest` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
+| `dockerfile-digest` | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`, `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `npm-ci-required` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `renovate-config` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `external-collaborators` | `GET /repos/{owner}/{repo}/collaborators` | `repo` | Members: Read | Members (Org): Read |
@@ -427,7 +427,7 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
 | `branch-protection` | Default branch must have protection rules enabled; skipped for private repos on free GitHub plans | `require_reviews`, `required_reviewers`, `additional_branches` |
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags. A `uses: owner/repo@tag` also counts as pinned when [`.github/workflows/actions.lock`](https://gh.io/actions-lockfile) (from `gh actions-lock`) lists it under that workflow and maps it to a commit | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
-| `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning | — |
+| `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning. Checks every Dockerfile in the repository (`Dockerfile`, `Dockerfile.*`, `Dockerfile-*`, `*.Dockerfile` and the `Containerfile` equivalents, excluding names with a source/doc extension such as `.go` or `.md`, and anything under `node_modules/`, `vendor/`, `third_party/` or `testdata/`). `ARG` references in `FROM` are resolved from the defaults of `ARG`s declared before the first `FROM`; a reference that depends on an `ARG` with no default, `scratch`, and references to earlier build stages are skipped | — |
 | `npm-ci-required` | CI workflows must use locked install commands (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) instead of bare install commands | — |
 | `renovate-config` | Renovate config must extend shared preset with a cooldown | `extends`, `min_stability_days` |
 | `external-collaborators` | No external collaborators may have admin privileges | — |
