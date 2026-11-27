@@ -20,6 +20,12 @@ rules:
     #     - api
     #     - backend-*
 
+  - id: dockerfile-version-tag
+    name: Dockerfile Final Image Version Tag
+    description: The final stage's base image must be in name:X.Y.Z@sha256:<digest> form
+    severity: warning
+    enabled: true
+
   - id: no-env-files
     name: No .env Files
     description: .env, .env.local, .env.production and similar files must not be committed (.env.example is allowed)
