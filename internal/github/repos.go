@@ -252,3 +252,60 @@ func waitForTransient(ctx context.Context, err error, attempt int) bool {
 		return true
 	}
 }
+
+// RepoTree is the recursive file listing of a repository at a ref.
+type RepoTree struct {
+	// Paths holds the path of every blob (file) in the tree.
+	Paths []string
+	// Truncated is true when GitHub cut the listing short (over 100,000
+	// entries or 7 MB), so Paths is incomplete.
+	Truncated bool
+}
+
+// ListTree returns every file path on branch via the recursive Git Trees API.
+// The branch is first resolved to its HEAD commit, so branch names with
+// characters that aren't safe in a URL path (the trees endpoint takes the ref
+// in the path) still work. Returns nil (no error) for a missing branch or an
+// empty repository (404/409).
+func ListTree(ctx context.Context, client *github.Client, owner, repo, branch string) (*RepoTree, error) {
+	var sha string
+	for attempt := 0; ; attempt++ {
+		ref, resp, err := client.Git.GetRef(ctx, owner, repo, "heads/"+branch)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if waitForTransient(ctx, err, attempt) {
+				continue
+			}
+			if resp != nil && (resp.StatusCode == 404 || resp.StatusCode == 409) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("resolving %s in %s/%s: %w", branch, owner, repo, err)
+		}
+		sha = ref.GetObject().GetSHA()
+		break
+	}
+	for attempt := 0; ; attempt++ {
+		tree, resp, err := client.Git.GetTree(ctx, owner, repo, sha, true)
+		if err != nil {
+			if waitForRateLimit(ctx, err) {
+				continue
+			}
+			if waitForTransient(ctx, err, attempt) {
+				continue
+			}
+			if resp != nil && (resp.StatusCode == 404 || resp.StatusCode == 409) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("listing tree of %s/%s at %s: %w", owner, repo, branch, err)
+		}
+		t := &RepoTree{Truncated: tree.GetTruncated()}
+		for _, e := range tree.Entries {
+			if e.GetType() == "blob" {
+				t.Paths = append(t.Paths, e.GetPath())
+			}
+		}
+		return t, nil
+	}
+}
