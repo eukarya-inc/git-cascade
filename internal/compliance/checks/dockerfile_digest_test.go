@@ -213,6 +213,11 @@ func TestFindUnpinnedBaseImages(t *testing.T) {
 			want:    []unpinnedBaseImage{{Line: 2, Image: "node:${B}", Resolved: "node:2"}},
 		},
 		{
+			name:    "heredoc body skipped",
+			content: "FROM node:22" + digest + "\nRUN <<-'EOF' sh\n\tFROM nginx:1.27\n\tEOF\nFROM nginx:1.27\n",
+			want:    []unpinnedBaseImage{{Line: 4, Image: "nginx:1.27", Resolved: "nginx:1.27"}},
+		},
+		{
 			name:    "allow comment on line above",
 			content: "ARG V=1.27\n# git-cascade:allow\nFROM nginx:${V}\n",
 		},

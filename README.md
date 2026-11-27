@@ -172,6 +172,7 @@ No additional GitHub permissions are required for Slack notifications. See [Slac
 | `actions-pinned` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `lockfile-required` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `dockerfile-digest` | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`, `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
+| `dockerfile-version-tag` | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1`, `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `npm-ci-required` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `renovate-config` | `GET /repos/{owner}/{repo}/contents/{path}` | `repo` / `public_repo` | Contents: Read | Contents: Read |
 | `external-collaborators` | `GET /repos/{owner}/{repo}/collaborators` | `repo` | Members: Read | Members (Org): Read |
@@ -249,7 +250,7 @@ A typical layout:
 compliance/         ← root of the compliance repository
   base.yaml         ← version, scope, output, notify
   governance.yaml   ← readme-exists, license-exists, codeowners-exists, external-collaborators
-  security.yaml     ← branch-protection, actions-pinned, dockerfile-digest, no-env-files, ai-config-safety
+  security.yaml     ← branch-protection, actions-pinned, dockerfile-digest, dockerfile-version-tag, no-env-files, ai-config-safety
   dependencies.yaml ← lockfile-required, npm-ci-required, renovate-config
 ```
 
@@ -428,6 +429,7 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags. A `uses: owner/repo@tag` also counts as pinned when [`.github/workflows/actions.lock`](https://gh.io/actions-lockfile) (from `gh actions-lock`) lists it under that workflow and maps it to a commit | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning. Checks every Dockerfile in the repository (`Dockerfile`, `Dockerfile.*`, `Dockerfile-*`, `*.Dockerfile` and the `Containerfile` equivalents, excluding names with a source/doc extension such as `.go` or `.md`, and anything under `node_modules/`, `vendor/`, `third_party/` or `testdata/`). `ARG` references in `FROM` are resolved from the defaults of `ARG`s declared before the first `FROM`; a reference that depends on an `ARG` with no default, `scratch`, and references to earlier build stages are skipped | — |
+| `dockerfile-version-tag` | The image each Dockerfile's final stage is built on must be in `name:X.Y.Z@sha256:<digest>` form: a tag of three numeric components (an optional leading `v` and a suffix such as `-alpine` or `rc2-slim` are allowed) plus a digest, so the shipped base is both pinned and readable. Images that publish no such tags (distroless `:nonroot`, `debian:12.8`) fail unless listed in `exempt_images`, which still requires the digest, or given an allow comment. Only the last `FROM` is checked (with `docker build --target`, the shipped stage may be a different one); a `FROM <stage>` is followed back to the stage that names a real image, and `FROM`s in between are neither checked nor suppressible. Dockerfile discovery and `ARG` resolution are the same as `dockerfile-digest`; `scratch` and images that depend on an `ARG` with no default are skipped | `exempt_images` |
 | `npm-ci-required` | CI workflows must use locked install commands (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) instead of bare install commands | — |
 | `renovate-config` | Renovate config must extend shared preset with a cooldown | `extends`, `min_stability_days` |
 | `external-collaborators` | No external collaborators may have admin privileges | — |
@@ -480,6 +482,22 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
       securebranch:
         - eukarya-inc/repository3
         - eukarya-inc/repository4
+```
+
+**`dockerfile-version-tag`**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `exempt_images` | YAML list of strings | Images that publish no `X.Y.Z` tags. Matching images only need an `@sha256:` digest. Each entry is a [`path.Match`](https://pkg.go.dev/path#Match) pattern against the image name without tag or digest (`*` does not cross `/`). An invalid pattern makes the check error. |
+
+```yaml
+- id: dockerfile-version-tag
+  severity: warning
+  enabled: true
+  params:
+    exempt_images:
+      - gcr.io/distroless/*     # :nonroot, :latest, :debug
+      - cgr.dev/chainguard/*
 ```
 
 **`renovate-config`**
@@ -565,6 +583,7 @@ The comment can use any of the following styles to cover common languages and fi
 | `no-pull-request-target` | Same line as the `pull_request_target:` trigger, or the line above |
 | `actions-pinned` | Same line as the `uses:` entry |
 | `dockerfile-digest` | Same line as the `FROM` instruction |
+| `dockerfile-version-tag` | Same line as the `FROM` that names the image, or the line above. When the final `FROM` is a stage reference (`FROM base`), also its same line |
 | `npm-ci-required` | Same line as the `npm install` / `pnpm install` / `yarn` command |
 
 ### Examples
@@ -814,7 +833,7 @@ Currently supported rules:
 
 These four are the **high-confidence candidates** identified so far — mechanical, deterministic, behavior-preserving fixes.
 
-Rules considered too risky or ambiguous for *automatic* file-based remediation (a human judgment call — license choice, secret rotation, semantic changes to CI triggers, etc. — is required): `renovate-config`, `no-secrets-inherit`, `no-pull-request-target`, `license-exists`, `codeowners-exists`, `dockerfile-digest`, `lockfile-required`, `no-env-files`, `ai-config-safety`, `secret-detection`. `branch-protection` and `external-collaborators` are repo/org API settings, not file edits, and are out of scope for this file-based remediation mechanism entirely.
+Rules considered too risky or ambiguous for *automatic* file-based remediation (a human judgment call — license choice, secret rotation, semantic changes to CI triggers, etc. — is required): `renovate-config`, `no-secrets-inherit`, `no-pull-request-target`, `license-exists`, `codeowners-exists`, `dockerfile-digest`, `dockerfile-version-tag`, `lockfile-required`, `no-env-files`, `ai-config-safety`, `secret-detection`. `branch-protection` and `external-collaborators` are repo/org API settings, not file edits, and are out of scope for this file-based remediation mechanism entirely.
 
 More rules will get remediators over time — a rule with no registered remediator is simply skipped even if `auto_remediation` is `true` on it.
 

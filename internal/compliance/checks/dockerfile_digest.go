@@ -91,7 +91,8 @@ type logicalLine struct {
 	text  string
 }
 
-// joinContinuations joins lines ending in a backslash with the next line.
+// joinContinuations joins lines ending in a backslash with the next line and
+// drops heredoc bodies.
 func joinContinuations(lines []string) []logicalLine {
 	var out []logicalLine
 	for i := 0; i < len(lines); i++ {
@@ -109,24 +110,57 @@ func joinContinuations(lines []string) []logicalLine {
 		}
 		ll.text = b.String()
 		out = append(out, ll)
+		// Skip heredoc bodies (RUN <<EOF ... EOF): their lines are data, so
+		// a line starting with FROM there is not an instruction.
+		if !strings.HasPrefix(strings.TrimSpace(ll.text), "#") {
+			for _, m := range heredocStart.FindAllStringSubmatch(ll.text, -1) {
+				for i+1 < len(lines) {
+					i++
+					body := strings.TrimRight(lines[i], "\r")
+					if m[1] == "-" {
+						body = strings.TrimLeft(body, "\t")
+					}
+					if body == m[2] {
+						break
+					}
+				}
+			}
+		}
 	}
 	return out
 }
 
-// findUnpinnedBaseImages scans a Dockerfile's content for FROM images not
-// pinned to a sha256 digest. ARG references are resolved from the defaults
-// of ARGs declared before the first FROM (the only ARGs a FROM can see);
-// a default may itself reference earlier ARGs. Skipped: scratch, references
-// to earlier build stages, references that depend on an ARG with no default
-// (supplied at build time, so they can't be checked statically), and lines
-// with a git-cascade:allow comment.
-func findUnpinnedBaseImages(content string) []unpinnedBaseImage {
+// heredocStart matches a heredoc opener such as <<EOF, <<-EOF or <<"EOF".
+// Captures: 1 = "-" when leading tabs are stripped, 2 = the delimiter.
+var heredocStart = regexp.MustCompile(`<<(-?)\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?`)
+
+// fromInstr is one FROM instruction of a Dockerfile.
+type fromInstr struct {
+	Line     int    // 0-based index of its first physical line
+	Image    string // image reference as written, e.g. "nginx:${NGINX_VERSION}"
+	Resolved string // Image with ARG defaults substituted, e.g. "nginx:1.27"
+	// Resolvable is false when Image depends on an ARG with no default
+	// (supplied at build time, so it can't be checked statically).
+	Resolvable bool
+	// Stage is the name given by `AS name`, or "".
+	Stage string
+	// FromStage is set when Image refers to an earlier build stage: the
+	// index into the parsed instructions of that stage's FROM.
+	FromStage int
+	IsStage   bool
+}
+
+// parseFroms returns the Dockerfile's lines and its FROM instructions in
+// order. ARG references are resolved from the defaults of ARGs declared
+// before the first FROM (the only ARGs a FROM can see); a default may itself
+// reference earlier ARGs.
+func parseFroms(content string) ([]string, []fromInstr) {
 	lines := strings.Split(content, "\n")
 	// Global ARGs: a nil value means declared without a (resolvable) default.
 	args := map[string]*string{}
-	stages := map[string]bool{} // build stage names seen so far (lowercase)
+	stages := map[string]int{} // build stage name (lowercase) → index into out
 	seenFrom := false
-	var out []unpinnedBaseImage
+	var out []fromInstr
 
 	for _, ll := range joinContinuations(lines) {
 		if !seenFrom {
@@ -149,30 +183,39 @@ func findUnpinnedBaseImages(content string) []unpinnedBaseImage {
 			continue
 		}
 		seenFrom = true
-		image := m[1]
-		if m[2] != "" {
-			stages[strings.ToLower(m[2])] = true
-		}
-
-		resolved, ok := expandArgs(image, args)
-		if !ok {
-			continue
-		}
-		if strings.EqualFold(resolved, "scratch") {
-			continue
-		}
+		f := fromInstr{Line: ll.start, Image: m[1], Stage: m[2]}
+		f.Resolved, f.Resolvable = expandArgs(f.Image, args)
 		// FROM <stage> refers to an earlier stage, not a registry image. The
-		// stage being defined on this line doesn't count (FROM x AS x).
-		if stages[strings.ToLower(resolved)] && !strings.EqualFold(resolved, m[2]) {
+		// stage being defined on this line doesn't count (FROM x AS x), as
+		// it isn't registered until after this check.
+		if f.Resolvable {
+			if idx, ok := stages[strings.ToLower(f.Resolved)]; ok {
+				f.FromStage, f.IsStage = idx, true
+			}
+		}
+		if f.Stage != "" {
+			stages[strings.ToLower(f.Stage)] = len(out)
+		}
+		out = append(out, f)
+	}
+	return lines, out
+}
+
+// findUnpinnedBaseImages scans a Dockerfile's content for FROM images not
+// pinned to a sha256 digest. Skipped: scratch, references to earlier build
+// stages, references that depend on an ARG with no default, and lines with a
+// git-cascade:allow comment.
+func findUnpinnedBaseImages(content string) []unpinnedBaseImage {
+	lines, froms := parseFroms(content)
+	var out []unpinnedBaseImage
+	for _, f := range froms {
+		if !f.Resolvable || f.IsStage || strings.EqualFold(f.Resolved, "scratch") {
 			continue
 		}
-		if sha256Digest.MatchString(resolved) {
+		if sha256Digest.MatchString(f.Resolved) || hasAllowComment(lines, f.Line) {
 			continue
 		}
-		if hasAllowComment(lines, ll.start) {
-			continue
-		}
-		out = append(out, unpinnedBaseImage{Line: ll.start, Image: image, Resolved: resolved})
+		out = append(out, unpinnedBaseImage{Line: f.Line, Image: f.Image, Resolved: f.Resolved})
 	}
 	return out
 }
@@ -224,29 +267,47 @@ func expandArgs(s string, args map[string]*string) (string, bool) {
 	return out, ok
 }
 
-type dockerfileDigestChecker struct{}
-
-func (c *dockerfileDigestChecker) ID() string { return "dockerfile-digest" }
-
-func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
-	ref := repo.DefaultBranch
-	result := func(status compliance.Status, msg string) *compliance.Result {
-		return &compliance.Result{
-			RuleID:   rule.ID,
-			RuleName: rule.Name,
-			Repo:     repo.FullName,
-			Status:   status,
-			Severity: rule.Severity,
-			Message:  msg,
-		}
+// describeFrom formats a FROM violation as "path:line: FROM image", adding
+// the ARG-resolved image when it differs from what is written.
+func describeFrom(path string, line int, image, resolved string) string {
+	desc := fmt.Sprintf("%s:%d: FROM %s", path, line+1, image)
+	if resolved != image {
+		desc += fmt.Sprintf(" (= %s)", resolved)
 	}
+	return desc
+}
 
+// dockerfile is one Dockerfile fetched from a repository.
+type dockerfile struct {
+	path    string
+	content string
+}
+
+// dockerfileSet is every Dockerfile found in a repository.
+type dockerfileSet struct {
+	files     []dockerfile
+	empty     bool // repository has no commits
+	truncated bool // tree listing was truncated, so files may be incomplete
+}
+
+// note is appended to result messages when the listing was truncated.
+func (s dockerfileSet) note() string {
+	if s.truncated {
+		return " (repository tree listing was truncated by GitHub; some Dockerfiles may not have been checked)"
+	}
+	return ""
+}
+
+// loadDockerfiles lists and fetches every Dockerfile (see isDockerfile and
+// skipDockerfileDir) on the repository's default branch.
+func loadDockerfiles(ctx context.Context, client *github.Client, repo gh.Repository) (dockerfileSet, error) {
+	ref := repo.DefaultBranch
 	tree, err := gh.CachedListTree(ctx, client, repo.Owner, repo.Name, ref)
 	if err != nil {
-		return nil, err
+		return dockerfileSet{}, err
 	}
 	if tree == nil {
-		return result(compliance.StatusSkip, "repository is empty"), nil
+		return dockerfileSet{empty: true}, nil
 	}
 
 	var paths []string
@@ -265,7 +326,7 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 		// cover them so a huge repo is never checked less than the root.
 		root, err := gh.CachedListDirectoryContents(ctx, client, repo.Owner, repo.Name, "", ref)
 		if err != nil {
-			return nil, err
+			return dockerfileSet{}, err
 		}
 		for _, e := range root {
 			if e.GetType() == "file" {
@@ -277,31 +338,50 @@ func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Clie
 
 	contents, err := fetchAll(ctx, client, repo.Owner, repo.Name, ref, paths)
 	if err != nil {
+		return dockerfileSet{}, err
+	}
+	set := dockerfileSet{truncated: tree.Truncated}
+	for i, p := range paths {
+		if contents[i] != nil {
+			set.files = append(set.files, dockerfile{path: p, content: string(contents[i])})
+		}
+	}
+	return set, nil
+}
+
+type dockerfileDigestChecker struct{}
+
+func (c *dockerfileDigestChecker) ID() string { return "dockerfile-digest" }
+
+func (c *dockerfileDigestChecker) Check(ctx context.Context, client *github.Client, repo gh.Repository, rule config.Rule) (*compliance.Result, error) {
+	result := func(status compliance.Status, msg string) *compliance.Result {
+		return &compliance.Result{
+			RuleID:   rule.ID,
+			RuleName: rule.Name,
+			Repo:     repo.FullName,
+			Status:   status,
+			Severity: rule.Severity,
+			Message:  msg,
+		}
+	}
+
+	files, err := loadDockerfiles(ctx, client, repo)
+	if err != nil {
 		return nil, err
+	}
+	if files.empty {
+		return result(compliance.StatusSkip, "repository is empty"), nil
 	}
 
 	var violations []string
-	found := false
-	for i, p := range paths {
-		if contents[i] == nil {
-			continue
-		}
-		found = true
-		for _, v := range findUnpinnedBaseImages(string(contents[i])) {
-			desc := fmt.Sprintf("%s:%d: FROM %s", p, v.Line+1, v.Image)
-			if v.Resolved != v.Image {
-				desc += fmt.Sprintf(" (= %s)", v.Resolved)
-			}
-			violations = append(violations, desc)
+	for _, f := range files.files {
+		for _, v := range findUnpinnedBaseImages(f.content) {
+			violations = append(violations, describeFrom(f.path, v.Line, v.Image, v.Resolved))
 		}
 	}
 
-	note := ""
-	if tree.Truncated {
-		note = " (repository tree listing was truncated by GitHub; some Dockerfiles may not have been checked)"
-	}
-
-	if !found {
+	note := files.note()
+	if len(files.files) == 0 {
 		return result(compliance.StatusSkip, "no Dockerfiles found"+note), nil
 	}
 	if len(violations) > 0 {

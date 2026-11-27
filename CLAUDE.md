@@ -40,7 +40,7 @@ Checkers must fetch file/directory content through `gh.CachedFetchFileContent` /
 
 ### Suppression comments
 
-Line-scanning checks (`secret-detection`, `no-secrets-inherit`, `no-pull-request-target`, `actions-pinned`, `dockerfile-digest`, `npm-ci-required`) honor a `git-cascade:allow` comment (in the language's comment syntax) on the same line or the line above — implemented once in `internal/compliance/checks/allow_comment.go` and reused by each checker rather than reimplemented per-rule.
+Line-scanning checks (`secret-detection`, `no-secrets-inherit`, `no-pull-request-target`, `actions-pinned`, `dockerfile-digest`, `dockerfile-version-tag`, `npm-ci-required`) honor a `git-cascade:allow` comment (in the language's comment syntax) on the same line or the line above — implemented once in `internal/compliance/checks/allow_comment.go` and reused by each checker rather than reimplemented per-rule.
 
 ### Config structure (`internal/config/config.go`)
 

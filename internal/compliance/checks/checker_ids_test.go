@@ -19,6 +19,7 @@ func TestCheckerIDsRegistered(t *testing.T) {
 		"renovate-config",
 		"actions-pinned",
 		"dockerfile-digest",
+		"dockerfile-version-tag",
 		"ai-config-safety",
 		"no-pull-request-target",
 		"no-secrets-inherit",
