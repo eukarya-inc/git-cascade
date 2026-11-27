@@ -429,7 +429,7 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
 | `actions-pinned` | GitHub Actions in workflows must use pinned SHA refs instead of tags. A `uses: owner/repo@tag` also counts as pinned when [`.github/workflows/actions.lock`](https://gh.io/actions-lockfile) (from `gh actions-lock`) lists it under that workflow and maps it to a commit | — |
 | `lockfile-required` | Package manifests must have corresponding lockfiles committed | — |
 | `dockerfile-digest` | Dockerfile `FROM` images must use `@sha256:` digest pinning. Checks every Dockerfile in the repository (`Dockerfile`, `Dockerfile.*`, `Dockerfile-*`, `*.Dockerfile` and the `Containerfile` equivalents, excluding names with a source/doc extension such as `.go` or `.md`, and anything under `node_modules/`, `vendor/`, `third_party/` or `testdata/`). `ARG` references in `FROM` are resolved from the defaults of `ARG`s declared before the first `FROM`; a reference that depends on an `ARG` with no default, `scratch`, and references to earlier build stages are skipped | — |
-| `dockerfile-version-tag` | The image each Dockerfile's final stage is built on must be in `name:X.Y.Z@sha256:<digest>` form: a tag of three numeric components (an optional leading `v` and a suffix such as `-alpine` or `rc2-slim` are allowed) plus a digest, so the shipped base is both pinned and readable. Images that publish no such tags (distroless `:nonroot`, `debian:12.8`) fail and need an allow comment. Only the last `FROM` is checked (with `docker build --target`, the shipped stage may be a different one); a `FROM <stage>` is followed back to the stage that names a real image, and `FROM`s in between are neither checked nor suppressible. Dockerfile discovery and `ARG` resolution are the same as `dockerfile-digest`; `scratch` and images that depend on an `ARG` with no default are skipped | — |
+| `dockerfile-version-tag` | The image each Dockerfile's final stage is built on must be in `name:X.Y.Z@sha256:<digest>` form: a tag of three numeric components (an optional leading `v` and a suffix such as `-alpine` or `rc2-slim` are allowed) plus a digest, so the shipped base is both pinned and readable. Images that publish no such tags (distroless `:nonroot`, `debian:12.8`) fail unless listed in `exempt_images`, which still requires the digest, or given an allow comment. Only the last `FROM` is checked (with `docker build --target`, the shipped stage may be a different one); a `FROM <stage>` is followed back to the stage that names a real image, and `FROM`s in between are neither checked nor suppressible. Dockerfile discovery and `ARG` resolution are the same as `dockerfile-digest`; `scratch` and images that depend on an `ARG` with no default are skipped | `exempt_images` |
 | `npm-ci-required` | CI workflows must use locked install commands (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`) instead of bare install commands | — |
 | `renovate-config` | Renovate config must extend shared preset with a cooldown | `extends`, `min_stability_days` |
 | `external-collaborators` | No external collaborators may have admin privileges | — |
@@ -482,6 +482,22 @@ These fields complement the per-rule `enabled: false` flag — use `enabled` to 
       securebranch:
         - eukarya-inc/repository3
         - eukarya-inc/repository4
+```
+
+**`dockerfile-version-tag`**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `exempt_images` | YAML list of strings | Images that publish no `X.Y.Z` tags. Matching images only need an `@sha256:` digest. Each entry is a [`path.Match`](https://pkg.go.dev/path#Match) pattern against the image name without tag or digest (`*` does not cross `/`). An invalid pattern makes the check error. |
+
+```yaml
+- id: dockerfile-version-tag
+  severity: warning
+  enabled: true
+  params:
+    exempt_images:
+      - gcr.io/distroless/*     # :nonroot, :latest, :debug
+      - cgr.dev/chainguard/*
 ```
 
 **`renovate-config`**

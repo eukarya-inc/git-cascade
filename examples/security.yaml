@@ -25,6 +25,11 @@ rules:
     description: The final stage's base image must be in name:X.Y.Z@sha256:<digest> form
     severity: warning
     enabled: true
+    # params:
+    #   # Images without X.Y.Z tags; they only need an @sha256 digest.
+    #   exempt_images:
+    #     - gcr.io/distroless/*
+    #     - cgr.dev/chainguard/*
 
   - id: no-env-files
     name: No .env Files

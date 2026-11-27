@@ -148,13 +148,74 @@ func TestFindUnversionedFinalImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findUnversionedFinalImage(tt.content)
+			got := findUnversionedFinalImage(tt.content, nil)
 			switch {
 			case got == nil && tt.want == nil:
 			case got == nil || tt.want == nil || *got != *tt.want:
 				t.Errorf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestImageName(t *testing.T) {
+	tests := map[string]string{
+		"nginx":      "nginx",
+		"nginx:1.27": "nginx",
+		"gcr.io/distroless/static:nonroot" + testDigest: "gcr.io/distroless/static",
+		"gcr.io/distroless/static" + testDigest:         "gcr.io/distroless/static",
+		"localhost:5000/app":                            "localhost:5000/app",
+		"localhost:5000/app:1.2.3":                      "localhost:5000/app",
+	}
+	for ref, want := range tests {
+		if got := imageName(ref); got != want {
+			t.Errorf("imageName(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}
+
+func TestFindUnversionedFinalImage_ExemptImages(t *testing.T) {
+	exempt := exemptImages{"gcr.io/distroless/*", "cgr.dev/chainguard/*"}
+	tests := []struct {
+		name    string
+		content string
+		fail    bool
+	}{
+		{"exempt with digest", "FROM gcr.io/distroless/static-debian12:nonroot" + testDigest + "\n", false},
+		{"exempt digest only", "FROM cgr.dev/chainguard/static" + testDigest + "\n", false},
+		{"exempt still needs digest", "FROM gcr.io/distroless/static-debian12:nonroot\n", true},
+		{"star does not cross slash", "FROM gcr.io/distroless/a/b:nonroot" + testDigest + "\n", true},
+		{"not exempt", "FROM debian:12.8-slim" + testDigest + "\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findUnversionedFinalImage(tt.content, exempt)
+			if (got != nil) != tt.fail {
+				t.Errorf("got %+v, want fail=%v", got, tt.fail)
+			}
+		})
+	}
+}
+
+func TestDockerfileVersionTagChecker_ExemptImagesParam(t *testing.T) {
+	fake := newFakeGitHub()
+	fake.setFile("org", "repo", "Dockerfile", []byte("FROM golang:1.23 AS build\nFROM gcr.io/distroless/static-debian12:nonroot"+testDigest+"\n"))
+	_, client := fake.serve(t)
+
+	rule := baseRule("dockerfile-version-tag")
+	rule.ListParams = map[string][]string{"exempt_images": {"gcr.io/distroless/*"}}
+	c := &dockerfileVersionTagChecker{}
+	result, err := c.Check(context.Background(), client, pubRepo(), rule)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if result.Status != compliance.StatusPass {
+		t.Errorf("expected pass, got %s: %s", result.Status, result.Message)
+	}
+
+	rule.ListParams = map[string][]string{"exempt_images": {"gcr.io/["}}
+	if _, err := c.Check(context.Background(), client, pubRepo(), rule); err == nil {
+		t.Error("expected error for invalid pattern")
 	}
 }
 
